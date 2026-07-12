@@ -1,0 +1,43 @@
+export type Category =
+  | 'Food Sauce'
+  | 'Fruits'
+  | 'Spices'
+  | 'Kitchen Ware'
+  | 'Cooking Fuels'
+  | 'And More';
+
+export interface Product {
+  id: string;
+  name: string;
+  category: Category;
+  price: number;
+  unit: string;
+  image_url: string | null;
+  description: string | null;
+  in_stock: boolean;
+  created_at?: string;
+}
+
+export interface CartItem {
+  product: Product;
+  quantity: number;
+}
+
+export interface OrderItem {
+  product_id: string;
+  name: string;
+  price: number;
+  unit: string;
+  quantity: number;
+}
+
+export interface Order {
+  id: string;
+  contact_name: string;
+  phone: string;
+  delivery_address: string;
+  items: OrderItem[];
+  subtotal: number;
+  status: string;
+  created_at: string;
+}
