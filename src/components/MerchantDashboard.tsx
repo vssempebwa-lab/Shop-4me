@@ -41,11 +41,32 @@ export default function MerchantDashboard({
 
   const loadOrders = async () => {
     setLoadingOrders(true);
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('orders')
-      .select('*')
+      .select('*, order_items(*)')
       .order('created_at', { ascending: false });
-    setOrders((data as Order[]) ?? []);
+
+    const normalizedOrders = ((data as Array<Record<string, unknown>>) ?? []).map((order) => {
+      const orderItems = Array.isArray((order as Record<string, unknown>).order_items)
+        ? ((order as Record<string, unknown>).order_items as Array<Record<string, unknown>>).map((item) => ({
+            ...item,
+            product_id: item.product_id as string,
+            name: item.name as string,
+            price: item.price as number,
+            unit: item.unit as string,
+            quantity: item.quantity as number,
+          }))
+        : Array.isArray((order as Record<string, unknown>).items)
+          ? ((order as Record<string, unknown>).items as Order['items'])
+          : [];
+
+      return {
+        ...(order as Order),
+        items: orderItems,
+      } as Order;
+    });
+
+    setOrders(normalizedOrders);
     setLoadingOrders(false);
   };
 
@@ -54,6 +75,13 @@ export default function MerchantDashboard({
     (s, o) => s + o.items.reduce((q, i) => q + i.quantity, 0),
     0,
   );
+
+  const handleStatusChange = async (orderId: string, status: string) => {
+    const { error } = await supabase.from('orders').update({ status }).eq('id', orderId);
+    if (!error) {
+      setOrders((current) => current.map((order) => (order.id === orderId ? { ...order, status } : order)));
+    }
+  };
 
   return (
     <section className="mx-auto max-w-7xl px-4 py-8">
@@ -105,7 +133,7 @@ export default function MerchantDashboard({
       </div>
 
       {tab === 'orders' ? (
-        <OrdersTab orders={orders} loading={loadingOrders} />
+        <OrdersTab orders={orders} loading={loadingOrders} onStatusChange={handleStatusChange} />
       ) : (
         <ProductsTab products={products} onEdit={(p) => setEditing(p)} />
       )}
@@ -179,7 +207,15 @@ function TabButton({
   );
 }
 
-function OrdersTab({ orders, loading }: { orders: Order[]; loading: boolean }) {
+function OrdersTab({
+  orders,
+  loading,
+  onStatusChange,
+}: {
+  orders: Order[];
+  loading: boolean;
+  onStatusChange: (orderId: string, status: string) => Promise<void>;
+}) {
   if (loading) {
     return (
       <div className="py-10 text-center text-sm text-gray-400">
@@ -212,9 +248,25 @@ function OrdersTab({ orders, loading }: { orders: Order[]; loading: boolean }) {
                 {new Date(o.created_at).toLocaleString()}
               </p>
             </div>
-            <span className="inline-flex items-center gap-1 rounded-full bg-brand-50 px-2.5 py-1 text-xs font-semibold text-brand-700 ring-1 ring-brand-200">
-              <CheckCircle2 className="h-3.5 w-3.5" /> {o.status}
-            </span>
+            <div className="flex items-center gap-2">
+              <label className="text-xs font-medium text-gray-500">
+                <span className="sr-only">Order status</span>
+                <select
+                  value={o.status}
+                  onChange={(e) => void onStatusChange(o.id, e.target.value)}
+                  className="rounded-full border border-gray-200 bg-white px-2.5 py-1 text-xs font-semibold text-brand-700 outline-none ring-0"
+                >
+                  <option value="Dispatched to Doorstep">Dispatched to Doorstep</option>
+                  <option value="Confirmed">Confirmed</option>
+                  <option value="Packed">Packed</option>
+                  <option value="Out for Delivery">Out for Delivery</option>
+                  <option value="Delivered">Delivered</option>
+                </select>
+              </label>
+              <span className="inline-flex items-center gap-1 rounded-full bg-brand-50 px-2.5 py-1 text-xs font-semibold text-brand-700 ring-1 ring-brand-200">
+                <CheckCircle2 className="h-3.5 w-3.5" /> {o.status}
+              </span>
+            </div>
           </div>
           <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
             <InfoLine icon={<User className="h-3.5 w-3.5" />} text={o.contact_name} />

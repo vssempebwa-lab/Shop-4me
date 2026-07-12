@@ -24,11 +24,14 @@ export interface CartItem {
 }
 
 export interface OrderItem {
+  id?: string;
+  order_id?: string;
   product_id: string;
   name: string;
   price: number;
   unit: string;
   quantity: number;
+  created_at?: string;
 }
 
 export interface Order {

@@ -7,7 +7,8 @@ import CartDrawer from './components/CartDrawer';
 import CheckoutModal, { OrderConfirmation } from './components/CheckoutModal';
 import MerchantDashboard from './components/MerchantDashboard';
 import { CartProvider } from './context/CartContext';
-import { supabase } from './lib/supabase';
+import { hasSupabaseConfig, supabase } from './lib/supabase';
+import { useAuth } from './hooks/useAuth';
 import type { Category, Order, Product } from './types';
 
 function App() {
@@ -19,14 +20,27 @@ function App() {
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [placedOrder, setPlacedOrder] = useState<Order | null>(null);
   const [merchantMode, setMerchantMode] = useState(false);
+  const [dbError, setDbError] = useState<string | null>(null);
+  const [attendantLoggedIn, setAttendantLoggedIn] = useState(false);
+
+  const { user, signInWithGoogle, signOut } = useAuth();
 
   const loadProducts = async () => {
     setLoading(true);
-    const { data } = await supabase
+    setDbError(null);
+
+    const { data, error } = await supabase
       .from('products')
       .select('*')
       .order('created_at', { ascending: true });
-    setProducts((data as Product[]) ?? []);
+
+    if (error) {
+      setProducts([]);
+      setDbError(error.message || 'Unable to load products right now.');
+    } else {
+      setProducts((data as Product[]) ?? []);
+    }
+
     setLoading(false);
   };
 
@@ -48,9 +62,22 @@ function App() {
           onSearchChange={setSearch}
           onOpenCart={() => setCartOpen(true)}
           onNavigateHelp={() => setCartOpen(false)}
+          attendantLoggedIn={attendantLoggedIn}
+          onAttendantLogin={() => {
+            setAttendantLoggedIn(true);
+            setMerchantMode(true);
+          }}
+          onAttendantLogout={() => {
+            setAttendantLoggedIn(false);
+            setMerchantMode(false);
+          }}
+          customerLoggedIn={!!user}
+          customerEmail={user?.email ?? ''}
+          onCustomerLogin={() => signInWithGoogle()}
+          onCustomerLogout={signOut}
         />
 
-        {merchantMode ? (
+        {merchantMode && attendantLoggedIn ? (
           <main className="flex-1">
             <MerchantDashboard products={products} onProductsChanged={loadProducts} />
           </main>
@@ -75,6 +102,13 @@ function App() {
                   onSelect={setActiveCategory}
                   counts={counts}
                 />
+                {dbError && (
+                  <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+                    {hasSupabaseConfig
+                      ? `Products are temporarily unavailable: ${dbError}`
+                      : 'Supabase is not configured yet. Please add your project URL and anon key to the environment file.'}
+                  </div>
+                )}
                 <ProductGrid
                   products={products}
                   activeCategory={activeCategory}
@@ -86,11 +120,29 @@ function App() {
           </main>
         )}
 
-        <Footer merchantMode={merchantMode} onToggleMerchant={() => setMerchantMode((v) => !v)} />
+        <Footer
+          merchantMode={merchantMode}
+          onToggleMerchant={() => {
+            if (!attendantLoggedIn) {
+              setMerchantMode(false);
+              return;
+            }
+            setMerchantMode((v) => !v);
+          }}
+        />
 
         {/* Floating merchant toggle (mobile-friendly, always reachable) */}
         <div className="fixed bottom-4 right-4 z-30 sm:hidden">
-          <MerchantToggle merchantMode={merchantMode} onToggle={() => setMerchantMode((v) => !v)} />
+          <MerchantToggle
+            merchantMode={merchantMode}
+            onToggle={() => {
+              if (!attendantLoggedIn) {
+                setMerchantMode(false);
+                return;
+              }
+              setMerchantMode((v) => !v);
+            }}
+          />
         </div>
 
         <CartDrawer

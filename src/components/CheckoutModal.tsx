@@ -29,6 +29,7 @@ export default function CheckoutModal({ open, onClose, onOrderPlaced }: Checkout
       return;
     }
     setSubmitting(true);
+
     const orderItems = items.map((i) => ({
       product_id: i.product.id,
       name: i.product.name,
@@ -37,27 +38,42 @@ export default function CheckoutModal({ open, onClose, onOrderPlaced }: Checkout
       quantity: i.quantity,
     }));
 
-    const { data, error: insertError } = await supabase
+    const { data: orderData, error: insertError } = await supabase
       .from('orders')
       .insert({
         contact_name: name.trim(),
         phone: phone.trim(),
         delivery_address: address.trim(),
-        items: orderItems,
         subtotal,
         status: 'Dispatched to Doorstep',
       })
       .select()
-      .maybeSingle();
+      .single();
 
-    setSubmitting(false);
-
-    if (insertError || !data) {
+    if (insertError || !orderData) {
+      setSubmitting(false);
       setError('Could not place order. Please try again.');
       return;
     }
 
-    onOrderPlaced(data as Order);
+    const { error: itemsError } = await supabase.from('order_items').insert(
+      orderItems.map((item) => ({
+        ...item,
+        order_id: orderData.id,
+      })),
+    );
+
+    setSubmitting(false);
+
+    if (itemsError) {
+      setError('Could not save order items. Please try again.');
+      return;
+    }
+
+    onOrderPlaced({
+      ...orderData,
+      items: orderItems,
+    } as Order);
     clear();
     setName('');
     setPhone('');
