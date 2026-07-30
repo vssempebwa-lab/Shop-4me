@@ -3,7 +3,7 @@
 ## File Structure
 
 - `src/components/MerchantDashboard.tsx`
-  - Admin pending queue, share-to-depot modal, depot performance, audit log, account management, attendant depot queue, rider dispatch, and paid/delivered actions.
+  - Admin pending queue, share-to-outlet modal, outlet performance, audit log, account management, attendant outlet queue, rider dispatch, and paid/delivered actions.
 - `src/components/AttendantWorkspace.tsx`
   - Dedicated Market Attendant workspace for `/attendant/workspace`, with localized queue, attendant identity/session header, status stepper, paid delivery confirmation, and rider dispatch.
 - `src/components/AvatarUploader.tsx`
@@ -11,24 +11,29 @@
 - `src/components/UserAvatar.tsx` and `src/lib/avatars.ts`
   - Shared avatar rendering helpers for uploaded photos and initials-based fallbacks.
 - `src/hooks/useAuth.ts`
-  - Loads `user_roles` metadata, including `assigned_depot`, `is_active`, `is_approved`, and touches `last_login_at`.
+  - Loads `user_roles` metadata, including `assigned_outlet`, `is_active`, `is_approved`, and touches `last_login_at`.
 - `src/types.ts`
-  - Shared TypeScript models for orders, depots, riders, user role profiles, and audit logs.
+  - Shared TypeScript models for orders, outlets, riders, user role profiles, and audit logs.
 - `netlify/functions/admin-users.js`
   - Server-side Supabase Auth Admin API wrapper for creating admin/attendant accounts, deactivating access, and resetting passwords.
 - `supabase/migrations/20260730143000_depot_attendant_admin_workflow.sql`
-  - SQL schema additions, RLS policies, helper functions, seed depots/riders, audit table, and realtime publication enrollment.
+  - Historical SQL schema additions, seed data, RLS policies, and realtime publication enrollment.
+- `supabase/migrations/20260730210000_rename_depot_to_outlet.sql`
+  - Safe Outlet rename migration for existing databases; renames tables/columns/functions/policies without dropping data.
 - `supabase/migrations/20260730172000_add_user_avatars.sql`
   - Adds `user_roles.avatar_url` and creates the public-read, authenticated-write `avatars` Supabase Storage bucket.
 
-## Depot Source of Truth
+## Outlet Source of Truth
 
-Depot data lives in Supabase (`public.depots`), not a static frontend array.
-That is the right fit for SFM because attendants, riders, order routing, audit views, and depot performance all need relationally valid depot codes. The frontend loads active depot records once and reuses shared helpers from `src/lib/depots.ts` for labels and matching.
+Outlet data lives in Supabase (`public.outlets`), not a static frontend array.
+That is the right fit for SFM because attendants, riders, order routing, audit views, and outlet performance all need relationally valid outlet codes. The frontend loads active outlet records once and reuses shared helpers from `src/lib/outlets.ts` for labels and matching.
 
-Official Kampala depot seed:
+Official Kampala outlet seed:
 
-| Division | Hub Market | Depot Code | Distribution Range |
+Decision note: SFM still stores and displays existing outlet code values such as `DEPOT-KAW-01`.
+Those are real identifiers in existing order/user records and should only become `OUTLET-KAW-01` through a deliberate value migration.
+
+| Division | Hub Market | Outlet Code | Distribution Range |
 | --- | --- | --- | --- |
 | Kawempe Division | Kalerwe Market | `DEPOT-KAW-01` | Kawempe, Mpererwe, Komamboga, Kisaasi |
 | Nakawa Division | Nakawa Market | `DEPOT-NAK-02` | Nakawa, Bugolobi, Luzira, Ntinda, Naguru |
@@ -41,8 +46,8 @@ Official Kampala depot seed:
 - `orders`
   - `order_status`
   - `payment_status`
-  - `is_shared_with_depot`
-  - `depot_code`
+  - `is_shared_with_outlet`
+  - `outlet_code`
   - `division`
   - `shared_at`
   - `shared_by`
@@ -56,29 +61,29 @@ Official Kampala depot seed:
   - `email`
   - `full_name`
   - `avatar_url`
-  - `assigned_depot`
+  - `assigned_outlet`
   - `is_active`
   - `invited_by`
   - `last_login_at`
   - `deactivated_at`
   - `updated_at`
-- `depots`
-  - Depot reference records keyed by `depot_code`, including `hub_market` and `distribution_areas`.
-- `depot_riders`
-  - Boda-boda rider contacts per depot.
+- `outlets`
+  - Outlet reference records keyed by `outlet_code`, including `hub_market` and `distribution_areas`.
+- `outlet_riders`
+  - Boda-boda rider contacts per outlet.
 - `admin_audit_logs`
   - Admin/attendant actions with actor, target, metadata, and timestamp.
 
 ## RLS Summary
 
 - Clients can select only their own orders.
-- Attendants can select/update only shared orders assigned to their `assigned_depot`.
+- Attendants can select/update only shared orders assigned to their `assigned_outlet`.
 - Admins can select/update/delete all orders.
 - `order_items` policies mirror the parent order access.
-- Active depot records are public-readable so checkout and temporary free-access dashboard flows can populate depot selectors.
+- Active outlet records are public-readable so checkout and temporary free-access dashboard flows can populate outlet selectors.
 - Admin-only data such as audit logs and account management records is restricted to active approved admins.
 - New admin/attendant accounts are created through the Netlify function with the Supabase service role key kept server-side.
-- Attendant status and rider-dispatch actions write `attendant_name`, `attendant_user_id`, and `depot_code` into `admin_audit_logs.metadata`, so the Admin Audit tab can trace who handled each order.
+- Attendant status and rider-dispatch actions write `attendant_name`, `attendant_user_id`, and `outlet_code` into `admin_audit_logs.metadata`, so the Admin Audit tab can trace who handled each order.
 - Account avatars are stored in the dedicated `avatars` Storage bucket and referenced by `user_roles.avatar_url`. Tables, audit rows, and the attendant session header all use the same avatar helper, falling back to initials when no uploaded image exists.
 
 ## Avatar Storage
@@ -120,4 +125,4 @@ VITE_SUPABASE_ANON_KEY=...
 ## Realtime
 
 The dashboard subscribes to `public.orders` changes through `merchant-dashboard-orders`.
-The migration adds `public.orders` to `supabase_realtime` if it is not already present, so changes to `order_status`, `payment_status`, and `is_shared_with_depot` refresh both Admin and Attendant views live.
+The migration adds `public.orders` to `supabase_realtime` if it is not already present, so changes to `order_status`, `payment_status`, and `is_shared_with_outlet` refresh both Admin and Attendant views live.

@@ -4,6 +4,38 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --color-brand-50: 238 250 255;
+  --color-brand-100: 217 243 252;
+  --color-brand-200: 182 232 248;
+  --color-brand-300: 123 215 241;
+  --color-brand-400: 56 188 229;
+  --color-brand-500: 25 164 219;
+  --color-brand-600: 12 134 184;
+  --color-brand-700: 11 107 148;
+  --color-brand-800: 13 88 120;
+  --color-brand-900: 16 73 97;
+  --color-brand-950: 8 47 66;
+  --color-gold-50: 246 247 247;
+  --color-gold-100: 232 234 235;
+  --color-gold-200: 207 212 214;
+  --color-gold-300: 170 179 183;
+  --color-gold-400: 102 114 122;
+  --color-gold-500: 5 7 7;
+  --color-gold-600: 4 6 6;
+  --color-gold-700: 3 4 4;
+  --color-gold-800: 2 3 3;
+  --color-gold-900: 1 2 2;
+  --color-gold-950: 0 0 0;
+  --sfm-primary-color: #19A4DB;
+  --sfm-navigation-bar-color: #082F42;
+  --sfm-accent-color: #050707;
+  --sfm-button-hover-color: #0C86B8;
+  --sfm-nav-link-hover-color: #19A4DB;
+  --sfm-page-bg: #F8FAFC;
+  --sfm-surface-bg: #FFFFFF;
+}
+
 html {
   scroll-behavior: smooth;
 }
@@ -11,7 +43,41 @@ html {
 body {
   font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
-  background-color: #f8fafc;
+  background-color: var(--sfm-page-bg);
+}
+
+.sfm-hover-lift-off .hover\:-translate-y-1:hover {
+  transform: none !important;
+}
+
+.sfm-hover-shadow-off .hover\:shadow-xl:hover,
+.sfm-hover-shadow-off .hover\:shadow-md:hover {
+  box-shadow: none !important;
+}
+
+body[data-sfm-heading-scale='small'] h1 {
+  font-size: clamp(1.75rem, 4vw, 2.75rem);
+}
+
+body[data-sfm-heading-scale='large'] h1 {
+  font-size: clamp(2.5rem, 5.5vw, 4rem);
+}
+
+.sfm-button-scale-on .sfm-button:hover {
+  transform: translateY(-1px) scale(1.02);
+}
+
+.sfm-button-shadow-off .sfm-button:hover {
+  box-shadow: none !important;
+}
+
+[data-nav-action]:hover {
+  color: var(--sfm-nav-link-hover-color);
+}
+
+.sfm-nav-hover-off [data-nav-action]:hover {
+  background: transparent !important;
+  color: inherit !important;
 }
 
 /* Custom scrollbar */

@@ -19,8 +19,8 @@ const DEMO_PENDING_ORDERS: Order[] = [
     status: 'Order Received',
     order_status: 'Order Received',
     payment_status: 'PENDING',
-    is_shared_with_depot: false,
-    depot_code: null,
+    is_shared_with_outlet: false,
+    outlet_code: null,
     division: 'Kawempe Division',
     created_at: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
   },
@@ -40,8 +40,8 @@ const DEMO_PENDING_ORDERS: Order[] = [
     status: 'Order Received',
     order_status: 'Order Received',
     payment_status: 'PENDING',
-    is_shared_with_depot: false,
-    depot_code: null,
+    is_shared_with_outlet: false,
+    outlet_code: null,
     division: 'Nakawa Division',
     created_at: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
   },
@@ -61,8 +61,8 @@ const DEMO_PENDING_ORDERS: Order[] = [
     status: 'Order Received',
     order_status: 'Order Received',
     payment_status: 'PENDING',
-    is_shared_with_depot: false,
-    depot_code: null,
+    is_shared_with_outlet: false,
+    outlet_code: null,
     division: 'Kampala Central',
     created_at: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
   },
@@ -81,8 +81,8 @@ const DEMO_PENDING_ORDERS: Order[] = [
     status: 'Order Received',
     order_status: 'Order Received',
     payment_status: 'PENDING',
-    is_shared_with_depot: false,
-    depot_code: null,
+    is_shared_with_outlet: false,
+    outlet_code: null,
     division: 'Makindye Division',
     created_at: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString(),
   },
@@ -101,8 +101,8 @@ const DEMO_PENDING_ORDERS: Order[] = [
     status: 'Order Received',
     order_status: 'Order Received',
     payment_status: 'PENDING',
-    is_shared_with_depot: false,
-    depot_code: null,
+    is_shared_with_outlet: false,
+    outlet_code: null,
     division: 'Rubaga Division',
     created_at: new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString(),
   },
@@ -111,7 +111,7 @@ const DEMO_PENDING_ORDERS: Order[] = [
 export function readDemoOrders() {
   try {
     const stored = window.localStorage.getItem(LOCAL_DEMO_ORDERS_KEY);
-    if (stored) return JSON.parse(stored) as Order[];
+    if (stored) return (JSON.parse(stored) as Array<Order & LegacyOrder>).map(normalizeStoredOrder);
   } catch {
     return DEMO_PENDING_ORDERS;
   }
@@ -133,4 +133,29 @@ export function updateDemoOrder(order: Order) {
 
   writeDemoOrders(nextOrders);
   return nextOrders;
+}
+
+type LegacyOrder = {
+  is_shared_with_depot?: boolean;
+  depot_code?: string | null;
+  manual_depot_override?: boolean | null;
+  suggested_depot_code?: string | null;
+};
+
+function normalizeStoredOrder(order: Order & LegacyOrder): Order {
+  const {
+    is_shared_with_depot,
+    depot_code,
+    manual_depot_override,
+    suggested_depot_code,
+    ...current
+  } = order;
+
+  return {
+    ...current,
+    is_shared_with_outlet: current.is_shared_with_outlet ?? is_shared_with_depot ?? false,
+    outlet_code: current.outlet_code ?? depot_code ?? null,
+    manual_outlet_override: current.manual_outlet_override ?? manual_depot_override ?? null,
+    suggested_outlet_code: current.suggested_outlet_code ?? suggested_depot_code ?? null,
+  };
 }

@@ -7,6 +7,11 @@ import {
   LayoutGrid,
 } from 'lucide-react';
 import type { Category } from '../types';
+import {
+  DEFAULT_SITE_SETTINGS,
+  getCategoryDisplayLabel,
+  type SiteSettings,
+} from '../lib/siteSettings';
 
 export const CATEGORIES: { name: Category; icon: typeof Carrot; blurb: string }[] = [
   { name: 'Food Sauce', icon: Carrot, blurb: 'Fresh groceries & vegetables' },
@@ -21,9 +26,15 @@ interface CategoryBarProps {
   active: Category | 'All';
   onSelect: (c: Category | 'All') => void;
   counts: Record<string, number>;
+  siteSettings?: SiteSettings;
 }
 
-export default function CategoryBar({ active, onSelect, counts }: CategoryBarProps) {
+export default function CategoryBar({
+  active,
+  onSelect,
+  counts,
+  siteSettings = DEFAULT_SITE_SETTINGS,
+}: CategoryBarProps) {
   return (
     <section className="mx-auto max-w-7xl px-4">
       <div className="no-scrollbar flex gap-3 overflow-x-auto pb-1">
@@ -36,7 +47,7 @@ export default function CategoryBar({ active, onSelect, counts }: CategoryBarPro
           }`}
         >
           <LayoutGrid className="h-4 w-4" />
-          All
+          {getCategoryDisplayLabel(siteSettings, 'All')}
           <span
             className={`rounded-full px-1.5 py-0.5 text-[11px] ${
               active === 'All' ? 'bg-white/20' : 'bg-gray-100 text-gray-500'
@@ -59,7 +70,7 @@ export default function CategoryBar({ active, onSelect, counts }: CategoryBarPro
               }`}
             >
               <Icon className="h-4 w-4" />
-              {name}
+              {getCategoryDisplayLabel(siteSettings, name)}
               <span
                 className={`rounded-full px-1.5 py-0.5 text-[11px] ${
                   isActive ? 'bg-white/20' : 'bg-gray-100 text-gray-500'

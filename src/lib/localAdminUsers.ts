@@ -4,7 +4,14 @@ export const LOCAL_ADMIN_USERS_KEY = 'sfm-local-admin-users';
 
 export function readLocalAdminUsers() {
   try {
-    return JSON.parse(window.localStorage.getItem(LOCAL_ADMIN_USERS_KEY) || '[]') as UserRoleProfile[];
+    const users = JSON.parse(window.localStorage.getItem(LOCAL_ADMIN_USERS_KEY) || '[]') as Array<
+      UserRoleProfile & { assigned_depot?: string | null }
+    >;
+
+    return users.map(({ assigned_depot, ...user }) => ({
+      ...user,
+      assigned_outlet: user.assigned_outlet ?? assigned_depot ?? null,
+    }));
   } catch {
     return [];
   }

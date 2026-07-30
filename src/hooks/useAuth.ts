@@ -20,7 +20,7 @@ export function useAuth() {
     try {
       const { data, error } = await supabase
         .from('user_roles')
-        .select('id,user_id,email,full_name,avatar_url,role,assigned_depot,is_approved,is_active,invited_by,last_login_at,created_at,deactivated_at')
+        .select('id,user_id,email,full_name,avatar_url,role,assigned_outlet,is_approved,is_active,invited_by,last_login_at,created_at,deactivated_at')
         .eq('user_id', userId)
         .maybeSingle();
 
@@ -123,7 +123,7 @@ export function useAuth() {
 
     const { data: roleData, error: roleError } = await supabase
       .from('user_roles')
-      .select('id,user_id,email,full_name,avatar_url,role,assigned_depot,is_approved,is_active,invited_by,last_login_at,created_at,deactivated_at')
+      .select('id,user_id,email,full_name,avatar_url,role,assigned_outlet,is_approved,is_active,invited_by,last_login_at,created_at,deactivated_at')
       .eq('user_id', data.user.id)
       .maybeSingle();
 

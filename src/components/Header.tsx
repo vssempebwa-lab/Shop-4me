@@ -14,6 +14,8 @@ import {
   Menu,
 } from 'lucide-react';
 import { useCart } from '../context/CartContext';
+import type { SiteSettings } from '../lib/siteSettings';
+import shopForMeLogo from '../../Admin-Pics/shop for me logo free.png';
 
 interface HeaderProps {
   search: string;
@@ -28,6 +30,7 @@ interface HeaderProps {
   onCustomerSignIn: (email: string, password: string) => Promise<unknown>;
   onCustomerSignUp: (email: string, password: string) => Promise<unknown>;
   onCustomerLogout: () => void;
+  siteSettings: SiteSettings;
 }
 
 export default function Header({
@@ -43,6 +46,7 @@ export default function Header({
   onCustomerSignIn,
   onCustomerSignUp,
   onCustomerLogout,
+  siteSettings,
 }: HeaderProps) {
   const { count } = useCart();
   const [accountOpen, setAccountOpen] = useState(false);
@@ -77,35 +81,29 @@ export default function Header({
       {/* Top announcement banner */}
       <div className="bg-brand-800 text-brand-50 text-xs sm:text-sm">
         <div className="mx-auto max-w-7xl px-4 py-2 flex items-center gap-2">
-          <Truck className="h-4 w-4 shrink-0 text-gold-300" />
-          <p className="truncate">
-            Welcome to Shop for me Uganda — We offer a reliable, affordable, and
-            convenient way to get everything you need delivered straight to your doorsteps.
+          <Truck className="h-4 w-4 shrink-0 text-brand-200" />
+          <p className="truncate" data-site-text="announcementText">
+            {siteSettings.announcementText}
           </p>
         </div>
       </div>
 
       {/* Main header */}
       <div
-        className={`bg-white shadow-sm transition-all duration-300 ${
-          scrolled ? 'shadow-md' : ''
+        className={`shadow-sm transition-all duration-300 ${
+          scrolled ? 'shadow-lg shadow-brand-950/20' : ''
         }`}
+        style={{ backgroundColor: siteSettings.navigationBarColor }}
       >
         <div className="mx-auto max-w-7xl px-4">
           <div className="flex items-center gap-3 py-3">
             {/* Logo */}
-            <a href="#" className="flex items-center gap-2 shrink-0">
-              <div className="grid h-10 w-10 place-items-center rounded-xl bg-gradient-to-br from-brand-500 to-brand-700 text-white shadow-md">
-                <ShoppingCart className="h-5 w-5" />
-              </div>
-              <div className="hidden sm:block leading-tight">
-                <p className="font-extrabold text-brand-800 text-lg tracking-tight">
-                  Shop For Me
-                </p>
-                <p className="text-[11px] font-semibold text-gold-600 -mt-0.5">
-                  List, Order &amp; Delivered
-                </p>
-              </div>
+            <a href="#" className="flex shrink-0 items-center">
+              <img
+                src={shopForMeLogo}
+                alt="Shop For Me Uganda"
+                className="h-12 w-36 object-contain object-left sm:h-14 sm:w-44"
+              />
             </a>
 
             {/* Search */}
@@ -115,7 +113,7 @@ export default function Header({
                 value={search}
                 onChange={(e) => onSearchChange(e.target.value)}
                 placeholder="Search products, brands and categories"
-                className="w-full rounded-full border border-gray-200 bg-gray-50 py-2.5 pl-10 pr-4 text-sm outline-none transition focus:border-brand-400 focus:bg-white focus:ring-2 focus:ring-brand-100"
+                className="w-full rounded-full border border-white/20 bg-white py-2.5 pl-10 pr-4 text-sm text-gray-900 outline-none transition placeholder:text-gray-400 focus:border-brand-300 focus:ring-2 focus:ring-brand-300/30"
               />
             </div>
 
@@ -125,7 +123,8 @@ export default function Header({
               <div className="relative" ref={helpRef}>
                 <button
                   onClick={() => setHelpOpen((v) => !v)}
-                  className="flex items-center gap-1.5 rounded-full px-3 py-2 text-sm font-medium text-gray-600 transition hover:bg-gray-100 hover:text-brand-700"
+                  data-nav-action
+                  className="flex items-center gap-1.5 rounded-full px-3 py-2 text-sm font-medium text-white/85 transition hover:bg-white/10 hover:text-white"
                 >
                   <HelpCircle className="h-5 w-5" />
                   <span className="hidden md:inline">Help</span>
@@ -165,7 +164,8 @@ export default function Header({
               <div className="relative" ref={accountRef}>
                 <button
                   onClick={() => setAccountOpen((v) => !v)}
-                  className="flex items-center gap-1.5 rounded-full px-3 py-2 text-sm font-medium text-gray-600 transition hover:bg-gray-100 hover:text-brand-700"
+                  data-nav-action
+                  className="flex items-center gap-1.5 rounded-full px-3 py-2 text-sm font-medium text-white/85 transition hover:bg-white/10 hover:text-white"
                 >
                   <UserIcon className="h-5 w-5" />
                   <span className="hidden md:inline">Account</span>
@@ -302,12 +302,12 @@ export default function Header({
               {/* Cart */}
               <button
                 onClick={onOpenCart}
-                className="relative flex items-center gap-2 rounded-full bg-brand-600 px-3.5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-700"
+                className="sfm-button relative flex items-center gap-2 rounded-full bg-brand-500 px-3.5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-400"
               >
                 <ShoppingCart className="h-5 w-5" />
                 <span className="hidden sm:inline">Cart</span>
                 {count > 0 && (
-                  <span className="absolute -right-1 -top-1 grid h-5 min-w-[20px] place-items-center rounded-full bg-gold-400 px-1 text-[11px] font-bold text-brand-900 ring-2 ring-white animate-pop">
+                  <span className="absolute -right-1 -top-1 grid h-5 min-w-[20px] place-items-center rounded-full bg-gold-500 px-1 text-[11px] font-bold text-white ring-2 ring-white animate-pop">
                     {count}
                   </span>
                 )}

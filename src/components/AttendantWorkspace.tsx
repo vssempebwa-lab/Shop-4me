@@ -10,14 +10,14 @@ import {
   User,
   LogOut,
 } from 'lucide-react';
-import type { Depot, DepotRider, Order, UserRoleProfile } from '../types';
+import type { Outlet, OutletRider, Order, UserRoleProfile } from '../types';
 import { supabase } from '../lib/supabase';
 import {
-  findDepotByCode,
-  formatDepotOption,
+  findOutletByCode,
+  formatOutletOption,
   formatDistributionAreas,
-  OFFICIAL_DEPOTS,
-} from '../lib/depots';
+  OFFICIAL_OUTLETS,
+} from '../lib/outlets';
 import { DEMO_ORDER_PREFIX, readDemoOrders, updateDemoOrder } from '../lib/demoOrders';
 import { formatUGX } from '../lib/format';
 import {
@@ -51,8 +51,8 @@ export default function AttendantWorkspace({
   onRedirectToStorefront,
 }: AttendantWorkspaceProps) {
   const [orders, setOrders] = useState<Order[]>([]);
-  const [depots, setDepots] = useState<Depot[]>(OFFICIAL_DEPOTS);
-  const [riders, setRiders] = useState<DepotRider[]>([]);
+  const [outlets, setOutlets] = useState<Outlet[]>(OFFICIAL_OUTLETS);
+  const [riders, setRiders] = useState<OutletRider[]>([]);
   const [loading, setLoading] = useState(true);
   const [updatingOrderId, setUpdatingOrderId] = useState<string | null>(null);
   const [dispatchOrder, setDispatchOrder] = useState<Order | null>(null);
@@ -60,7 +60,7 @@ export default function AttendantWorkspace({
   const [paymentConfirmed, setPaymentConfirmed] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
-  const assignedDepot = profile?.assigned_depot ?? '';
+  const assignedOutlet = profile?.assigned_outlet ?? '';
   const attendantName = profile?.full_name || profile?.email || 'Market Attendant';
   const attendantUserId = profile?.user_id ?? null;
   const profileUser: UserRoleProfile = profile ?? {
@@ -70,10 +70,10 @@ export default function AttendantWorkspace({
     avatar_url: null,
     role: 'attendant',
   };
-  const depot = findDepotByCode(depots, assignedDepot);
-  const depotRiders = useMemo(
-    () => riders.filter((rider) => rider.depot_code === assignedDepot),
-    [assignedDepot, riders],
+  const outlet = findOutletByCode(outlets, assignedOutlet);
+  const outletRiders = useMemo(
+    () => riders.filter((rider) => rider.outlet_code === assignedOutlet),
+    [assignedOutlet, riders],
   );
 
   useEffect(() => {
@@ -91,20 +91,20 @@ export default function AttendantWorkspace({
 
   useEffect(() => {
     void loadWorkspaceData();
-  }, [assignedDepot]);
+  }, [assignedOutlet]);
 
   useEffect(() => {
-    if (!assignedDepot) return;
+    if (!assignedOutlet) return;
 
     const channel = supabase
-      .channel(`attendant-orders-${assignedDepot || 'unassigned'}`)
+      .channel(`attendant-orders-${assignedOutlet || 'unassigned'}`)
       .on(
         'postgres_changes',
         {
           event: '*',
           schema: 'public',
           table: 'orders',
-          filter: `depot_code=eq.${assignedDepot}`,
+          filter: `outlet_code=eq.${assignedOutlet}`,
         },
         () => {
           void loadOrders();
@@ -115,7 +115,7 @@ export default function AttendantWorkspace({
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [assignedDepot]);
+  }, [assignedOutlet]);
 
   const showToast = (message: string) => {
     setToast(message);
@@ -136,51 +136,51 @@ export default function AttendantWorkspace({
         ...metadata,
         attendant_user_id: attendantUserId,
         attendant_name: attendantName,
-        depot_code: assignedDepot,
+        outlet_code: assignedOutlet,
       },
     });
   };
 
   const loadWorkspaceData = async () => {
     setLoading(true);
-    await Promise.all([loadDepots(), loadRiders(), loadOrders()]);
+    await Promise.all([loadOutlets(), loadRiders(), loadOrders()]);
     setLoading(false);
   };
 
-  const loadDepots = async () => {
+  const loadOutlets = async () => {
     const { data, error } = await supabase
-      .from('depots')
+      .from('outlets')
       .select('*')
       .eq('is_active', true)
-      .order('depot_code');
+      .order('outlet_code');
 
     if (!error && data?.length) {
-      setDepots(data as Depot[]);
+      setOutlets(data as Outlet[]);
     } else {
-      setDepots(OFFICIAL_DEPOTS);
+      setOutlets(OFFICIAL_OUTLETS);
     }
   };
 
   const loadRiders = async () => {
-    if (!assignedDepot) {
+    if (!assignedOutlet) {
       setRiders([]);
       return;
     }
 
     const { data, error } = await supabase
-      .from('depot_riders')
+      .from('outlet_riders')
       .select('*')
-      .eq('depot_code', assignedDepot)
+      .eq('outlet_code', assignedOutlet)
       .eq('is_active', true)
       .order('name');
 
     if (!error) {
-      setRiders((data as DepotRider[]) ?? []);
+      setRiders((data as OutletRider[]) ?? []);
     }
   };
 
   const loadOrders = async () => {
-    if (!assignedDepot) {
+    if (!assignedOutlet) {
       setOrders([]);
       return;
     }
@@ -188,24 +188,24 @@ export default function AttendantWorkspace({
     const { data, error } = await supabase
       .from('orders')
       .select('*, order_items(*)')
-      .eq('depot_code', assignedDepot)
-      .eq('is_shared_with_depot', true)
+      .eq('outlet_code', assignedOutlet)
+      .eq('is_shared_with_outlet', true)
       .order('created_at', { ascending: false });
 
     if (error) {
-      setOrders(getDemoOrdersForDepot(assignedDepot));
+      setOrders(getDemoOrdersForOutlet(assignedOutlet));
       return;
     }
 
     const liveOrders = ((data as Array<Record<string, unknown>>) ?? []).map(normalizeOrder);
-    const demoOrders = getDemoOrdersForDepot(assignedDepot);
+    const demoOrders = getDemoOrdersForOutlet(assignedOutlet);
     const liveIds = new Set(liveOrders.map((order) => order.id));
     const localOnlyOrders = demoOrders.filter((order) => !liveIds.has(order.id));
 
     setOrders([...localOnlyOrders, ...liveOrders]);
   };
 
-  const changeDepotOrderStatus = async (order: Order, nextState: OrderStatus) => {
+  const changeOutletOrderStatus = async (order: Order, nextState: OrderStatus) => {
     setUpdatingOrderId(order.id);
 
     const patch: Partial<Order> = {
@@ -250,7 +250,7 @@ export default function AttendantWorkspace({
     showToast(`Order updated to ${getStatusDisplay(nextState).label}.`);
   };
 
-  const dispatchRider = async (order: Order, rider: DepotRider) => {
+  const dispatchRider = async (order: Order, rider: OutletRider) => {
     setUpdatingOrderId(order.id);
 
     const patch: Partial<Order> = {
@@ -305,7 +305,7 @@ export default function AttendantWorkspace({
       return;
     }
 
-    void changeDepotOrderStatus(order, nextState);
+    void changeOutletOrderStatus(order, nextState);
   };
 
   if (!profile || profile.role !== 'attendant') {
@@ -314,7 +314,7 @@ export default function AttendantWorkspace({
         <EmptyState
           icon={<ClipboardList className="h-8 w-8" />}
           title="Attendant access required"
-          text="Sign in with a Market Attendant account to view a localized depot queue."
+          text="Sign in with a Market Attendant account to view a localized outlet queue."
         />
       </section>
     );
@@ -327,15 +327,15 @@ export default function AttendantWorkspace({
           <h2 className="text-2xl font-extrabold text-brand-800">Market Attendant Workspace</h2>
           <p className="text-sm text-gray-500">Process routed orders from your assigned hub.</p>
         </div>
-        {depot ? (
+        {outlet ? (
           <div className="min-w-[280px] rounded-2xl border border-brand-100 bg-white px-4 py-3 shadow-sm">
             <div className="flex items-start gap-3">
               <UserAvatar user={profileUser} size="md" />
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-extrabold text-brand-800">
-                  {depot.hub_market || depot.name} - {depot.depot_code}
+                  {outlet.hub_market || outlet.name} - {outlet.outlet_code}
                 </p>
-                <p className="text-xs font-medium text-brand-700">{depot.division}</p>
+                <p className="text-xs font-medium text-brand-700">{outlet.division}</p>
                 <p className="mt-2 text-xs font-semibold text-gray-700">
                   Attendant: {attendantName}
                 </p>
@@ -355,14 +355,14 @@ export default function AttendantWorkspace({
           </div>
         ) : (
           <div className="rounded-2xl border border-red-100 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
-            Invalid assigned depot: {assignedDepot || 'Not assigned'}
+            Invalid assigned outlet: {assignedOutlet || 'Not assigned'}
           </div>
         )}
       </div>
 
-      {depot && (
+      {outlet && (
         <p className="mt-3 rounded-2xl border border-gray-100 bg-white px-4 py-3 text-xs font-medium text-gray-500 shadow-sm">
-          Distribution range: {formatDistributionAreas(depot)}
+          Distribution range: {formatDistributionAreas(outlet)}
         </p>
       )}
 
@@ -381,13 +381,13 @@ export default function AttendantWorkspace({
       {loading ? (
         <div className="py-12 text-center text-sm text-gray-400">
           <Loader2 className="mx-auto h-6 w-6 animate-spin" />
-          <p className="mt-2">Loading depot queue...</p>
+          <p className="mt-2">Loading outlet queue...</p>
         </div>
       ) : orders.length === 0 ? (
         <EmptyState
           icon={<Truck className="h-8 w-8" />}
           title="No orders in your queue right now"
-          text="Orders routed to this depot will appear here automatically."
+          text="Orders routed to this outlet will appear here automatically."
         />
       ) : (
         <div className="mt-5 space-y-4">
@@ -395,7 +395,7 @@ export default function AttendantWorkspace({
             <OrderQueueCard
               key={order.id}
               order={order}
-              depot={depot}
+              outlet={outlet}
               loading={updatingOrderId === order.id}
               onAdvance={() => requestAdvance(order)}
               onDispatch={() => setDispatchOrder(order)}
@@ -407,7 +407,7 @@ export default function AttendantWorkspace({
       {dispatchOrder && (
         <RiderDispatchPanel
           order={dispatchOrder}
-          riders={depotRiders}
+          riders={outletRiders}
           loading={updatingOrderId === dispatchOrder.id}
           onClose={() => setDispatchOrder(null)}
           onDispatch={(rider) => void dispatchRider(dispatchOrder, rider)}
@@ -422,7 +422,7 @@ export default function AttendantWorkspace({
           onConfirmedChange={setPaymentConfirmed}
           onClose={() => setPaymentOrder(null)}
           onSubmit={() => {
-            void changeDepotOrderStatus(paymentOrder, 'Delivered');
+            void changeOutletOrderStatus(paymentOrder, 'Delivered');
             setPaymentOrder(null);
           }}
         />
@@ -435,13 +435,13 @@ export default function AttendantWorkspace({
 
 function OrderQueueCard({
   order,
-  depot,
+  outlet,
   loading,
   onAdvance,
   onDispatch,
 }: {
   order: Order;
-  depot: Depot | null;
+  outlet: Outlet | null;
   loading: boolean;
   onAdvance: () => void;
   onDispatch: () => void;
@@ -472,7 +472,7 @@ function OrderQueueCard({
           <span className="rounded-full bg-brand-50 px-2.5 py-1 text-xs font-bold text-brand-700">
             {statusDisplay.label}
           </span>
-          {order.manual_depot_override && (
+          {order.manual_outlet_override && (
             <span className="rounded-full bg-amber-50 px-2.5 py-1 text-xs font-bold text-amber-700">
               Manually assigned
             </span>
@@ -493,7 +493,7 @@ function OrderQueueCard({
         <InfoLine icon={<Phone className="h-3.5 w-3.5" />} text={order.phone} />
         <InfoLine
           icon={<MapPin className="h-3.5 w-3.5" />}
-          text={depot ? formatDepotOption(depot) : order.depot_code || 'Pickup station'}
+          text={outlet ? formatOutletOption(outlet) : order.outlet_code || 'Pickup station'}
         />
       </div>
 
@@ -586,10 +586,10 @@ function RiderDispatchPanel({
   onDispatch,
 }: {
   order: Order;
-  riders: DepotRider[];
+  riders: OutletRider[];
   loading: boolean;
   onClose: () => void;
-  onDispatch: (rider: DepotRider) => void;
+  onDispatch: (rider: OutletRider) => void;
 }) {
   return (
     <div className="fixed inset-0 z-[70] flex items-end justify-center sm:items-center">
@@ -602,7 +602,7 @@ function RiderDispatchPanel({
         <div className="mt-4 space-y-2">
           {riders.length === 0 ? (
             <p className="rounded-xl bg-gray-50 p-3 text-sm text-gray-500">
-              No active Boda-boda riders are registered for this depot yet.
+              No active Boda-boda riders are registered for this outlet yet.
             </p>
           ) : (
             riders.map((rider) => (
@@ -620,7 +620,7 @@ function RiderDispatchPanel({
                   type="button"
                   onClick={() => onDispatch(rider)}
                   disabled={loading}
-                  className="inline-flex items-center gap-2 rounded-full bg-gold-500 px-3 py-1.5 text-xs font-bold text-brand-950 disabled:bg-gray-300"
+                  className="inline-flex items-center gap-2 rounded-full bg-gold-500 px-3 py-1.5 text-xs font-bold text-white disabled:bg-gray-300 disabled:text-gray-600"
                 >
                   {loading && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
                   Dispatch
@@ -791,16 +791,16 @@ function normalizeOrder(order: Record<string, unknown>): Order {
     items: joinedItems.length ? joinedItems : jsonItems,
     order_status: normalizeOrderStatus((order.order_status ?? order.status) as string),
     payment_status: (order.payment_status as Order['payment_status']) ?? 'PENDING',
-    is_shared_with_depot: Boolean(order.is_shared_with_depot),
+    is_shared_with_outlet: Boolean(order.is_shared_with_outlet),
   };
 }
 
-function getDemoOrdersForDepot(assignedDepot: string) {
+function getDemoOrdersForOutlet(assignedOutlet: string) {
   return readDemoOrders()
     .map((order) => normalizeOrder(order as unknown as Record<string, unknown>))
     .filter(
       (order) =>
-        order.depot_code === assignedDepot &&
-        order.is_shared_with_depot === true,
+        order.outlet_code === assignedOutlet &&
+        order.is_shared_with_outlet === true,
     );
 }

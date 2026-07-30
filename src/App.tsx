@@ -10,6 +10,11 @@ import MerchantSignInModal from './components/MerchantSignInModal';
 import AttendantWorkspace from './components/AttendantWorkspace';
 import { CartProvider } from './context/CartContext';
 import { hasSupabaseConfig, supabase } from './lib/supabase';
+import {
+  DEFAULT_SITE_SETTINGS,
+  fetchSiteSettings,
+  type SiteSettings,
+} from './lib/siteSettings';
 import { useAuth } from './hooks/useAuth';
 import { getLatestLocalAttendant } from './lib/localAdminUsers';
 import type { Category, Order, Product } from './types';
@@ -26,6 +31,7 @@ function App() {
   const [attendantMode, setAttendantMode] = useState(false);
   const [merchantLoginOpen, setMerchantLoginOpen] = useState(false);
   const [dbError, setDbError] = useState<string | null>(null);
+  const [siteSettings, setSiteSettings] = useState<SiteSettings>(DEFAULT_SITE_SETTINGS);
 
   const {
     user,
@@ -138,6 +144,10 @@ function App() {
     void loadProducts();
   }, []);
 
+  useEffect(() => {
+    void fetchSiteSettings().then(setSiteSettings);
+  }, []);
+
   const counts = useMemo(() => {
     const c: Record<string, number> = { All: products.length };
     for (const p of products) c[p.category] = (c[p.category] ?? 0) + 1;
@@ -160,6 +170,7 @@ function App() {
           onCustomerSignIn={signInWithEmail}
           onCustomerSignUp={signUpWithEmail}
           onCustomerLogout={signOut}
+          siteSettings={siteSettings}
         />
 
         {attendantMode ? (
@@ -171,14 +182,14 @@ function App() {
                   : localAttendant
                     ? {
                         ...localAttendant,
-                        assigned_depot: localAttendant.assigned_depot || 'DEPOT-KAW-01',
+                        assigned_outlet: localAttendant.assigned_outlet || 'DEPOT-KAW-01',
                       }
                   : {
                       user_id: '00000000-0000-4000-8000-000000000001',
                       email: 'attendant@shop4me.local',
                       full_name: 'Local Market Attendant',
                       role: 'attendant',
-                      assigned_depot: 'DEPOT-KAW-01',
+                      assigned_outlet: 'DEPOT-KAW-01',
                       is_active: true,
                       is_approved: true,
                     }
@@ -209,13 +220,15 @@ function App() {
               }
               onOpenAttendantWorkspace={navigateToAttendantWorkspace}
               onProductsChanged={loadProducts}
+              siteSettings={siteSettings}
+              onSiteSettingsChanged={setSiteSettings}
             />
           </main>
         ) : (
           <main className="flex-1">
-            <HeroSection />
+            <HeroSection siteSettings={siteSettings} />
             <div className="mx-auto max-w-7xl space-y-8 px-4 py-8">
-              <CategoryHighlights />
+              <CategoryHighlights siteSettings={siteSettings} />
               <div id="catalog" className="space-y-4">
                 <div className="flex flex-wrap items-end justify-between gap-2">
                   <div>
@@ -231,6 +244,7 @@ function App() {
                   active={activeCategory}
                   onSelect={setActiveCategory}
                   counts={counts}
+                  siteSettings={siteSettings}
                 />
                 {dbError && (
                   <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
@@ -244,6 +258,7 @@ function App() {
                   activeCategory={activeCategory}
                   search={search}
                   loading={loading}
+                  siteSettings={siteSettings}
                 />
               </div>
             </div>
@@ -265,6 +280,7 @@ function App() {
               navigateToMerchantDashboard();
             }
           }}
+          siteSettings={siteSettings}
         />
 
         {/* Floating merchant toggle (mobile-friendly, always reachable) */}
@@ -295,6 +311,7 @@ function App() {
             setCheckoutOpen(true);
           }}
           user={user}
+          siteSettings={siteSettings}
         />
         <CheckoutModal
           open={checkoutOpen}

@@ -2,15 +2,17 @@ import { X, Plus, Minus, Trash2, ShoppingBag, ArrowRight } from 'lucide-react';
 import type { User } from '@supabase/supabase-js';
 import { useCart } from '../context/CartContext';
 import { formatUGX } from '../lib/format';
+import type { SiteSettings } from '../lib/siteSettings';
 
 interface CartDrawerProps {
   open: boolean;
   onClose: () => void;
   onCheckout: () => void;
   user: User | null;
+  siteSettings: SiteSettings;
 }
 
-export default function CartDrawer({ open, onClose, onCheckout }: CartDrawerProps) {
+export default function CartDrawer({ open, onClose, onCheckout, siteSettings }: CartDrawerProps) {
   const { items, subtotal, increment, decrement, remove, count } = useCart();
 
   return (
@@ -52,15 +54,19 @@ export default function CartDrawer({ open, onClose, onCheckout }: CartDrawerProp
             <div className="grid h-20 w-20 place-items-center rounded-full bg-brand-50 text-brand-300">
               <ShoppingBag className="h-9 w-9" />
             </div>
-            <p className="mt-4 text-sm font-semibold text-gray-700">Your cart is empty</p>
-            <p className="mt-1 text-xs text-gray-500">
-              Add fresh groceries and essentials to get started.
+            <p className="mt-4 text-sm font-semibold text-gray-700" data-site-text="cartEmptyTitle">
+              {siteSettings.cartEmptyTitle}
+            </p>
+            <p className="mt-1 text-xs text-gray-500" data-site-text="cartEmptyText">
+              {siteSettings.cartEmptyText}
             </p>
             <button
               onClick={onClose}
               className="mt-5 rounded-full bg-brand-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-brand-700"
             >
-              Continue Shopping
+              <span data-site-text="continueShoppingLabel">
+                {siteSettings.continueShoppingLabel}
+              </span>
             </button>
           </div>
         ) : (
@@ -132,13 +138,14 @@ export default function CartDrawer({ open, onClose, onCheckout }: CartDrawerProp
               Flat UGX 5,000 delivery fee. Pay on delivery via MTN or Airtel Merchant Till.
             </p>
             <p className="mt-3 rounded-2xl bg-brand-50 p-3 text-sm font-medium text-brand-700">
-              No sign-in required. Enter your phone number at checkout so the depot can confirm your order.
+              No sign-in required. Enter your phone number at checkout so the outlet can confirm your order.
             </p>
             <button
               onClick={onCheckout}
               className="mt-3 flex w-full items-center justify-center gap-2 rounded-full bg-brand-600 py-3 text-sm font-bold text-white shadow-md transition hover:bg-brand-700"
             >
-              Checkout <ArrowRight className="h-4 w-4" />
+              <span data-site-text="checkoutButtonLabel">{siteSettings.checkoutButtonLabel}</span>
+              <ArrowRight className="h-4 w-4" />
             </button>
           </div>
         )}

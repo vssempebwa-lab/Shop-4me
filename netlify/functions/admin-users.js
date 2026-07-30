@@ -4,7 +4,7 @@ const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const allowFreeAdminAccess = process.env.SFM_ALLOW_FREE_ADMIN_ACCESS === 'true';
 const freeAdminHeader = 'local-free-access';
-const officialDepotCodes = new Set([
+const officialOutletCodes = new Set([
   'DEPOT-KAW-01',
   'DEPOT-NAK-02',
   'DEPOT-CEN-03',
@@ -64,7 +64,7 @@ async function createAccount(event, supabaseAdmin, actorId) {
   const fullName = String(body.fullName || '').trim();
   const avatarUrl = String(body.avatarUrl || '').trim() || null;
   const role = body.role === 'attendant' ? 'attendant' : 'admin';
-  const assignedDepot = role === 'attendant' ? String(body.assignedDepot || '').trim() : null;
+  const assignedOutlet = role === 'attendant' ? String(body.assignedOutlet || '').trim() : null;
 
   if (!email.includes('@')) {
     return json(400, { message: 'Enter a valid email address.' });
@@ -74,20 +74,20 @@ async function createAccount(event, supabaseAdmin, actorId) {
     return json(400, { message: 'Password must be at least 8 characters.' });
   }
 
-  if (role === 'attendant' && !assignedDepot) {
-    return json(400, { message: 'Assign a depot for attendant accounts.' });
+  if (role === 'attendant' && !assignedOutlet) {
+    return json(400, { message: 'Assign an outlet for attendant accounts.' });
   }
 
   if (role === 'attendant') {
-    const { data: depot, error: depotError } = await supabaseAdmin
-      .from('depots')
-      .select('depot_code')
-      .eq('depot_code', assignedDepot)
+    const { data: outlet, error: outletError } = await supabaseAdmin
+      .from('outlets')
+      .select('outlet_code')
+      .eq('outlet_code', assignedOutlet)
       .eq('is_active', true)
       .maybeSingle();
 
-    if ((depotError || !depot) && !officialDepotCodes.has(assignedDepot)) {
-      return json(400, { message: 'Assigned depot must be one of the active official SFM depots.' });
+    if ((outletError || !outlet) && !officialOutletCodes.has(assignedOutlet)) {
+      return json(400, { message: 'Assigned outlet must be one of the active official SFM outlets.' });
     }
   }
 
@@ -109,7 +109,7 @@ async function createAccount(event, supabaseAdmin, actorId) {
       full_name: fullName || null,
       avatar_url: avatarUrl,
       role,
-      assigned_depot: assignedDepot,
+      assigned_outlet: assignedOutlet,
       is_approved: true,
       is_active: true,
       invited_by: actorId,
@@ -128,10 +128,10 @@ async function createAccount(event, supabaseAdmin, actorId) {
     action: 'account_created',
     target_type: 'user_role',
     target_id: userData.user.id,
-    metadata: { email, role, assigned_depot: assignedDepot },
+    metadata: { email, role, assigned_outlet: assignedOutlet },
   });
 
-  return json(201, { userId: userData.user.id, email, role, assignedDepot });
+  return json(201, { userId: userData.user.id, email, role, assignedOutlet });
 }
 
 async function deactivateAccount(event, supabaseAdmin, actorId) {
@@ -217,31 +217,31 @@ async function updateAccount(event, supabaseAdmin, actorId) {
   const fullName = String(body.fullName || '').trim();
   const avatarUrl = body.avatarUrl === null ? null : String(body.avatarUrl || '').trim() || undefined;
   const role = body.role === 'attendant' ? 'attendant' : 'admin';
-  const assignedDepot = role === 'attendant' ? String(body.assignedDepot || '').trim() : null;
+  const assignedOutlet = role === 'attendant' ? String(body.assignedOutlet || '').trim() : null;
 
   if (!userId) return json(400, { message: 'Missing userId.' });
   if (!fullName) return json(400, { message: 'Full name is required.' });
-  if (role === 'attendant' && !assignedDepot) {
-    return json(400, { message: 'Assign a depot for attendant accounts.' });
+  if (role === 'attendant' && !assignedOutlet) {
+    return json(400, { message: 'Assign an outlet for attendant accounts.' });
   }
 
   if (role === 'attendant') {
-    const { data: depot, error: depotError } = await supabaseAdmin
-      .from('depots')
-      .select('depot_code')
-      .eq('depot_code', assignedDepot)
+    const { data: outlet, error: outletError } = await supabaseAdmin
+      .from('outlets')
+      .select('outlet_code')
+      .eq('outlet_code', assignedOutlet)
       .eq('is_active', true)
       .maybeSingle();
 
-    if ((depotError || !depot) && !officialDepotCodes.has(assignedDepot)) {
-      return json(400, { message: 'Assigned depot must be one of the active official SFM depots.' });
+    if ((outletError || !outlet) && !officialOutletCodes.has(assignedOutlet)) {
+      return json(400, { message: 'Assigned outlet must be one of the active official SFM outlets.' });
     }
   }
 
   const updatePayload = {
     full_name: fullName,
     role,
-    assigned_depot: assignedDepot,
+    assigned_outlet: assignedOutlet,
     updated_at: new Date().toISOString(),
   };
 
@@ -253,7 +253,7 @@ async function updateAccount(event, supabaseAdmin, actorId) {
     .from('user_roles')
     .update(updatePayload)
     .eq('user_id', userId)
-    .select('id,user_id,email,full_name,avatar_url,role,assigned_depot,is_approved,is_active,invited_by,last_login_at,created_at,deactivated_at')
+    .select('id,user_id,email,full_name,avatar_url,role,assigned_outlet,is_approved,is_active,invited_by,last_login_at,created_at,deactivated_at')
     .maybeSingle();
 
   if (error) return json(400, { message: error.message || 'Could not update account.' });
@@ -271,7 +271,7 @@ async function updateAccount(event, supabaseAdmin, actorId) {
     metadata: {
       full_name: fullName,
       role,
-      assigned_depot: assignedDepot,
+      assigned_outlet: assignedOutlet,
       avatar_updated: avatarUrl !== undefined,
     },
   });
@@ -293,7 +293,7 @@ export async function handler(event) {
   if (event.httpMethod === 'GET') {
     const { data, error } = await supabaseAdmin
       .from('user_roles')
-      .select('id,user_id,email,full_name,avatar_url,role,assigned_depot,is_approved,is_active,invited_by,last_login_at,created_at,deactivated_at')
+      .select('id,user_id,email,full_name,avatar_url,role,assigned_outlet,is_approved,is_active,invited_by,last_login_at,created_at,deactivated_at')
       .in('role', ['admin', 'attendant', 'merchant'])
       .order('created_at', { ascending: false });
 

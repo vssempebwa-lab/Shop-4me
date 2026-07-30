@@ -22,13 +22,23 @@ import {
   Loader2,
   TrendingUp,
   Boxes,
+  Palette,
+  Eye,
+  RotateCcw,
+  Save,
+  History,
+  Lock,
+  Type,
+  ImagePlus,
+  Upload,
+  Link,
 } from 'lucide-react';
 import type { User as SupabaseUser } from '@supabase/supabase-js';
 import type {
   AdminAuditLog,
   Category,
-  Depot,
-  DepotRider,
+  Outlet,
+  OutletRider,
   Order,
   Product,
   UserRoleProfile,
@@ -36,12 +46,12 @@ import type {
 import { supabase } from '../lib/supabase';
 import { formatUGX } from '../lib/format';
 import {
-  findDepotByCode,
-  formatDepotOption,
+  findOutletByCode,
+  formatOutletOption,
   formatDistributionAreas,
-  OFFICIAL_DEPOTS,
-  suggestDepotFromText,
-} from '../lib/depots';
+  OFFICIAL_OUTLETS,
+  suggestOutletFromText,
+} from '../lib/outlets';
 import { DEMO_ORDER_PREFIX, readDemoOrders, updateDemoOrder } from '../lib/demoOrders';
 import {
   getNextOrderStatus,
@@ -56,6 +66,24 @@ import ConfirmDeleteModal from './ConfirmDeleteModal';
 import AvatarUploader from './AvatarUploader';
 import UserAvatar from './UserAvatar';
 import type { AppRole } from '../hooks/useAuth';
+import {
+  applySiteSettings,
+  fetchSiteContentDraft,
+  fetchSiteContentVersions,
+  fetchSiteSettingRecords,
+  getCategoryContent,
+  normalizeSiteSettings,
+  publishSiteSettings,
+  rollbackSiteSettings,
+  resetSettingsSection,
+  saveSiteContentDraft,
+  validateSiteSettings,
+  type CategoryContent,
+  type SiteSettingRecord,
+  type SiteContentVersion,
+  type SiteSettings,
+  type TrustBadgeContent,
+} from '../lib/siteSettings';
 
 interface MerchantDashboardProps {
   products: Product[];
@@ -64,9 +92,19 @@ interface MerchantDashboardProps {
   profile: UserRoleProfile | null;
   onOpenAttendantWorkspace?: () => void;
   onProductsChanged: () => void;
+  siteSettings: SiteSettings;
+  onSiteSettingsChanged: (settings: SiteSettings) => void;
 }
 
-type Tab = 'pending' | 'orders' | 'attendant' | 'accounts' | 'audit' | 'reports' | 'products';
+type Tab =
+  | 'pending'
+  | 'orders'
+  | 'attendant'
+  | 'accounts'
+  | 'audit'
+  | 'reports'
+  | 'settings'
+  | 'products';
 
 const FREE_ACCESS_HEADER = 'local-free-access';
 
@@ -168,13 +206,16 @@ export default function MerchantDashboard({
   profile,
   onOpenAttendantWorkspace,
   onProductsChanged,
+  siteSettings,
+  onSiteSettingsChanged,
 }: MerchantDashboardProps) {
   const isAdmin = role === 'admin' || role === 'merchant';
+  const canManageSiteSettings = role === 'admin';
   const isAttendant = role === 'attendant';
   const [tab, setTab] = useState<Tab>(isAttendant ? 'attendant' : 'pending');
   const [orders, setOrders] = useState<Order[]>([]);
-  const [depots, setDepots] = useState<Depot[]>([]);
-  const [riders, setRiders] = useState<DepotRider[]>([]);
+  const [outlets, setOutlets] = useState<Outlet[]>([]);
+  const [riders, setRiders] = useState<OutletRider[]>([]);
   const [adminUsers, setAdminUsers] = useState<UserRoleProfile[]>([]);
   const [auditLogs, setAuditLogs] = useState<AdminAuditLog[]>([]);
   const [loadingOrders, setLoadingOrders] = useState(true);
@@ -182,7 +223,7 @@ export default function MerchantDashboard({
   const [showAdd, setShowAdd] = useState(false);
   const [editing, setEditing] = useState<Product | null>(null);
   const [shareOrder, setShareOrder] = useState<Order | null>(null);
-  const [shareDepot, setShareDepot] = useState('');
+  const [shareOutlet, setShareOutlet] = useState('');
   const [sharingOrderId, setSharingOrderId] = useState<string | null>(null);
   const [shareError, setShareError] = useState<string | null>(null);
   const [dispatchOrder, setDispatchOrder] = useState<Order | null>(null);
@@ -209,7 +250,7 @@ export default function MerchantDashboard({
     void loadOrders();
     void loadAdminData();
     void loadAdminUsers();
-  }, [profile?.assigned_depot, role]);
+  }, [profile?.assigned_outlet, role]);
 
   useEffect(() => {
     const channel = supabase
@@ -227,13 +268,13 @@ export default function MerchantDashboard({
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [profile?.assigned_depot, role]);
+  }, [profile?.assigned_outlet, role]);
 
   useEffect(() => {
-    if (!shareOrder || shareDepot) return;
-    const suggestedDepot = suggestDepotForOrder(shareOrder, depots);
-    setShareDepot(suggestedDepot?.depot_code ?? depots[0]?.depot_code ?? '');
-  }, [depots, shareDepot, shareOrder]);
+    if (!shareOrder || shareOutlet) return;
+    const suggestedOutlet = suggestOutletForOrder(shareOrder, outlets);
+    setShareOutlet(suggestedOutlet?.outlet_code ?? outlets[0]?.outlet_code ?? '');
+  }, [outlets, shareOutlet, shareOrder]);
 
   const loadOrders = async () => {
     setLoadingOrders(true);
@@ -242,16 +283,16 @@ export default function MerchantDashboard({
       .select('*, order_items(*)')
       .order('created_at', { ascending: false });
 
-    if (isAttendant && profile?.assigned_depot) {
+    if (isAttendant && profile?.assigned_outlet) {
       query = query
-        .eq('depot_code', profile.assigned_depot)
-        .eq('is_shared_with_depot', true);
+        .eq('outlet_code', profile.assigned_outlet)
+        .eq('is_shared_with_outlet', true);
     }
 
     const { data, error } = await query;
 
     if (error) {
-      setOrders(isAdmin ? getDemoOrdersForDashboard(isAttendant, profile?.assigned_depot) : []);
+      setOrders(isAdmin ? getDemoOrdersForDashboard(isAttendant, profile?.assigned_outlet) : []);
       setLoadingOrders(false);
       return;
     }
@@ -278,7 +319,7 @@ export default function MerchantDashboard({
     });
 
     const liveOrders = normalizedOrders.map(normalizeOrder);
-    const demoOrders = isAdmin ? getDemoOrdersForDashboard(isAttendant, profile?.assigned_depot) : [];
+    const demoOrders = isAdmin ? getDemoOrdersForDashboard(isAttendant, profile?.assigned_outlet) : [];
     const liveIds = new Set(liveOrders.map((order) => order.id));
     const localOnlyOrders = demoOrders.filter((order) => !liveIds.has(order.id));
     const nextOrders = [...localOnlyOrders, ...liveOrders];
@@ -290,17 +331,17 @@ export default function MerchantDashboard({
   const loadAdminData = async () => {
     setLoadingAdminData(true);
 
-    const [depotsResult, ridersResult, auditResult] = await Promise.all([
-      supabase.from('depots').select('*').eq('is_active', true).order('depot_code'),
-      supabase.from('depot_riders').select('*').eq('is_active', true).order('name'),
+    const [outletsResult, ridersResult, auditResult] = await Promise.all([
+      supabase.from('outlets').select('*').eq('is_active', true).order('outlet_code'),
+      supabase.from('outlet_riders').select('*').eq('is_active', true).order('name'),
       supabase
         .from('admin_audit_logs')
         .select('*')
         .in('action', [
-          'order_shared_to_depot',
+          'order_shared_to_outlet',
           'rider_dispatched',
           'order_delivered_paid',
-          'depot_order_status_changed',
+          'outlet_order_status_changed',
           'attendant_order_status_changed',
           'attendant_rider_dispatched',
         ])
@@ -308,12 +349,12 @@ export default function MerchantDashboard({
         .limit(30),
     ]);
 
-    if (!depotsResult.error && depotsResult.data?.length) {
-      setDepots((depotsResult.data as Depot[]) ?? []);
+    if (!outletsResult.error && outletsResult.data?.length) {
+      setOutlets((outletsResult.data as Outlet[]) ?? []);
     } else {
-      setDepots(OFFICIAL_DEPOTS);
+      setOutlets(OFFICIAL_OUTLETS);
     }
-    if (!ridersResult.error) setRiders((ridersResult.data as DepotRider[]) ?? []);
+    if (!ridersResult.error) setRiders((ridersResult.data as OutletRider[]) ?? []);
     if (!auditResult.error) setAuditLogs((auditResult.data as AdminAuditLog[]) ?? []);
 
     setLoadingAdminData(false);
@@ -359,34 +400,34 @@ export default function MerchantDashboard({
     });
   };
 
-  const shareOrderToDepot = async (
+  const shareOrderToOutlet = async (
     targetOrder = shareOrder,
-    targetDepot = shareDepot,
-    suggestedDepotCode?: string | null,
+    targetOutlet = shareOutlet,
+    suggestedOutletCode?: string | null,
   ) => {
-    if (!targetOrder || !targetDepot) return;
+    if (!targetOrder || !targetOutlet) return;
 
     setSharingOrderId(targetOrder.id);
     setShareError(null);
 
     const sharedAt = new Date().toISOString();
-    const selectedDepotRecord = depots.find((depot) => depot.depot_code === targetDepot);
-    const manualOverride = Boolean(suggestedDepotCode && suggestedDepotCode !== targetDepot);
+    const selectedOutletRecord = outlets.find((outlet) => outlet.outlet_code === targetOutlet);
+    const manualOverride = Boolean(suggestedOutletCode && suggestedOutletCode !== targetOutlet);
     const adminName = profile?.full_name || profile?.email || user?.email || 'Admin';
     const adminId = user?.id ?? null;
 
     if (isDemoOrder(targetOrder)) {
       const routedOrder = normalizeOrder({
         ...targetOrder,
-        depot_code: targetDepot,
-        division: selectedDepotRecord?.division ?? targetOrder.division ?? null,
-        is_shared_with_depot: true,
+        outlet_code: targetOutlet,
+        division: selectedOutletRecord?.division ?? targetOrder.division ?? null,
+        is_shared_with_outlet: true,
         shared_at: sharedAt,
         shared_by: adminId,
         shared_by_admin_id: adminId,
         shared_by_admin_name: adminName,
-        manual_depot_override: manualOverride,
-        suggested_depot_code: suggestedDepotCode ?? null,
+        manual_outlet_override: manualOverride,
+        suggested_outlet_code: suggestedOutletCode ?? null,
         order_status: 'Processing',
         status: 'Processing',
       });
@@ -396,10 +437,10 @@ export default function MerchantDashboard({
       );
       setSharingOrderId(null);
       setShareOrder(null);
-      setShareDepot('');
+      setShareOutlet('');
       showToast({
         tone: 'success',
-        message: manualOverride ? 'Demo order shared with manual depot override.' : 'Demo order shared to depot.',
+        message: manualOverride ? 'Demo order shared with manual outlet override.' : 'Demo order shared to outlet.',
       });
       return;
     }
@@ -407,15 +448,15 @@ export default function MerchantDashboard({
     const { error } = await supabase
       .from('orders')
       .update({
-        depot_code: targetDepot,
-        division: selectedDepotRecord?.division ?? targetOrder.division ?? null,
-        is_shared_with_depot: true,
+        outlet_code: targetOutlet,
+        division: selectedOutletRecord?.division ?? targetOrder.division ?? null,
+        is_shared_with_outlet: true,
         shared_at: sharedAt,
         shared_by: adminId,
         shared_by_admin_id: adminId,
         shared_by_admin_name: adminName,
-        manual_depot_override: manualOverride,
-        suggested_depot_code: suggestedDepotCode ?? null,
+        manual_outlet_override: manualOverride,
+        suggested_outlet_code: suggestedOutletCode ?? null,
         order_status: 'Processing',
         status: 'Processing',
       })
@@ -423,14 +464,14 @@ export default function MerchantDashboard({
 
     if (error) {
       setSharingOrderId(null);
-      setShareError(error.message || 'Could not share order with depot.');
+      setShareError(error.message || 'Could not share order with outlet.');
       return;
     }
 
-    await writeAuditLog('order_shared_to_depot', targetOrder.id, {
-      depot_code: targetDepot,
-      selected_depot_code: targetDepot,
-      suggested_depot_code: suggestedDepotCode ?? null,
+    await writeAuditLog('order_shared_to_outlet', targetOrder.id, {
+      outlet_code: targetOutlet,
+      selected_outlet_code: targetOutlet,
+      suggested_outlet_code: suggestedOutletCode ?? null,
       manual_override: manualOverride,
       shared_by_admin_id: adminId,
       shared_by_admin_name: adminName,
@@ -440,13 +481,13 @@ export default function MerchantDashboard({
 
     setSharingOrderId(null);
     setShareOrder(null);
-    setShareDepot('');
+    setShareOutlet('');
     await loadOrders();
     await loadAdminData();
-    showToast({ tone: 'success', message: 'Order shared to depot.' });
+    showToast({ tone: 'success', message: 'Order shared to outlet.' });
   };
 
-  const changeDepotOrderStatus = async (
+  const changeOutletOrderStatus = async (
     order: Order,
     nextStatus: OrderStatus,
   ) => {
@@ -479,17 +520,17 @@ export default function MerchantDashboard({
       return;
     }
 
-    await writeAuditLog('depot_order_status_changed', order.id, {
+    await writeAuditLog('outlet_order_status_changed', order.id, {
       from: order.order_status ?? order.status,
       to: nextStatus,
-      depot_code: order.depot_code,
+      outlet_code: order.outlet_code,
     });
 
     await loadOrders();
     showToast({ tone: 'success', message: `Order marked ${nextStatus}.` });
   };
 
-  const dispatchRider = async (order: Order, rider: DepotRider) => {
+  const dispatchRider = async (order: Order, rider: OutletRider) => {
     const dispatchedAt = new Date().toISOString();
     const patch: Partial<Order> = {
       dispatched_rider_id: rider.id,
@@ -525,7 +566,7 @@ export default function MerchantDashboard({
     await writeAuditLog('rider_dispatched', order.id, {
       rider_id: rider.id,
       rider_name: rider.name,
-      depot_code: rider.depot_code,
+      outlet_code: rider.outlet_code,
       dispatched_at: dispatchedAt,
     });
 
@@ -566,7 +607,7 @@ export default function MerchantDashboard({
     }
 
     await writeAuditLog('order_delivered_paid', order.id, {
-      depot_code: order.depot_code,
+      outlet_code: order.outlet_code,
       delivered_at: deliveredAt,
     });
 
@@ -662,7 +703,7 @@ export default function MerchantDashboard({
         )}
         {isAttendant && (
           <TabButton active={tab === 'attendant'} onClick={() => setTab('attendant')}>
-            <Building2 className="h-4 w-4" /> Depot Queue
+            <Building2 className="h-4 w-4" /> Outlet Queue
           </TabButton>
         )}
         {isAdmin && (
@@ -680,6 +721,11 @@ export default function MerchantDashboard({
             <BarChart3 className="h-4 w-4" /> Reports
           </TabButton>
         )}
+        {canManageSiteSettings && (
+          <TabButton active={tab === 'settings'} onClick={() => setTab('settings')}>
+            <Palette className="h-4 w-4" /> Site Settings
+          </TabButton>
+        )}
         {isAdmin && (
           <TabButton active={tab === 'products'} onClick={() => setTab('products')}>
             <Package className="h-4 w-4" /> Products
@@ -694,14 +740,14 @@ export default function MerchantDashboard({
 
       {tab === 'pending' ? (
         <PendingOrdersTab
-          orders={orders.filter((order) => !order.is_shared_with_depot)}
-          depots={depots}
+          orders={orders.filter((order) => !order.is_shared_with_outlet)}
+          outlets={outlets}
           loading={loadingOrders}
           sharingOrderId={sharingOrderId}
           shareError={shareError}
-          onShare={(order, depotCode, suggestedDepotCode) => {
+          onShare={(order, outletCode, suggestedOutletCode) => {
             setShareError(null);
-            void shareOrderToDepot(order, depotCode, suggestedDepotCode);
+            void shareOrderToOutlet(order, outletCode, suggestedOutletCode);
           }}
         />
       ) : tab === 'orders' ? (
@@ -712,18 +758,18 @@ export default function MerchantDashboard({
       ) : tab === 'attendant' ? (
         <AttendantQueueTab
           orders={orders}
-          riders={riders.filter((rider) => rider.depot_code === profile?.assigned_depot)}
-          assignedDepot={profile?.assigned_depot ?? ''}
-          assignedDepotRecord={findDepotByCode(depots, profile?.assigned_depot ?? '')}
+          riders={riders.filter((rider) => rider.outlet_code === profile?.assigned_outlet)}
+          assignedOutlet={profile?.assigned_outlet ?? ''}
+          assignedOutletRecord={findOutletByCode(outlets, profile?.assigned_outlet ?? '')}
           loading={loadingOrders}
-          onChangeStatus={changeDepotOrderStatus}
+          onChangeStatus={changeOutletOrderStatus}
           onOpenDispatch={setDispatchOrder}
           onPaidDelivered={markAsPaidAndDelivered}
         />
       ) : tab === 'accounts' ? (
         <AccountManagementTab
           users={[...localAdminUsers, ...adminUsers]}
-          depots={depots}
+          outlets={outlets}
           open={accountPanelOpen}
           onOpenChange={setAccountPanelOpen}
           onReload={loadAdminUsers}
@@ -731,15 +777,24 @@ export default function MerchantDashboard({
           onToast={showToast}
         />
       ) : tab === 'audit' ? (
-        <AuditAndDepotPerformanceTab
+        <AuditAndOutletPerformanceTab
           orders={orders}
-          depots={depots}
+          outlets={outlets}
           logs={auditLogs}
           users={adminUsers}
           loading={loadingAdminData}
         />
       ) : tab === 'reports' ? (
-        <ReportsTab orders={orders} depots={depots} loading={loadingOrders || loadingAdminData} />
+        <ReportsTab orders={orders} outlets={outlets} loading={loadingOrders || loadingAdminData} />
+      ) : tab === 'settings' ? (
+        <SiteSettingsTab
+          settings={siteSettings}
+          user={user}
+          profile={profile}
+          onSettingsChanged={onSiteSettingsChanged}
+          onToast={showToast}
+          onAuditLogged={loadAdminData}
+        />
       ) : tab === 'products' ? (
         <ProductsTab
           products={products}
@@ -774,7 +829,7 @@ export default function MerchantDashboard({
       {dispatchOrder && (
         <RiderDispatchModal
           order={dispatchOrder}
-          riders={riders.filter((rider) => rider.depot_code === dispatchOrder.depot_code)}
+          riders={riders.filter((rider) => rider.outlet_code === dispatchOrder.outlet_code)}
           onClose={() => setDispatchOrder(null)}
           onDispatch={(rider) => void dispatchRider(dispatchOrder, rider)}
         />
@@ -829,20 +884,20 @@ function DashboardToast({
 
 function PendingOrdersTab({
   orders,
-  depots,
+  outlets,
   loading,
   sharingOrderId,
   shareError,
   onShare,
 }: {
   orders: Order[];
-  depots: Depot[];
+  outlets: Outlet[];
   loading: boolean;
   sharingOrderId: string | null;
   shareError: string | null;
-  onShare: (order: Order, depotCode: string, suggestedDepotCode: string | null) => void;
+  onShare: (order: Order, outletCode: string, suggestedOutletCode: string | null) => void;
 }) {
-  const [selectedDepots, setSelectedDepots] = useState<Record<string, string>>({});
+  const [selectedOutlets, setSelectedOutlets] = useState<Record<string, string>>({});
 
   if (loading) return <LoadingState label="Loading pending orders..." />;
 
@@ -850,8 +905,8 @@ function PendingOrdersTab({
     return (
       <EmptyState
         icon={<Share2 className="h-8 w-8" />}
-        title="No pending depot shares"
-        text="Orders waiting for a depot assignment will appear here."
+        title="No pending outlet shares"
+        text="Orders waiting for an outlet assignment will appear here."
       />
     );
   }
@@ -859,16 +914,16 @@ function PendingOrdersTab({
   return (
     <div className="mt-4 space-y-3">
       {orders.map((order) => {
-        const suggestedDepot = suggestDepotForOrder(order, depots);
-        const clientDepot = findDepotByCode(depots, order.depot_code ?? '');
-        const selectedDepot =
-          selectedDepots[order.id] ??
-          clientDepot?.depot_code ??
-          suggestedDepot?.depot_code ??
-          depots[0]?.depot_code ??
+        const suggestedOutlet = suggestOutletForOrder(order, outlets);
+        const clientOutlet = findOutletByCode(outlets, order.outlet_code ?? '');
+        const selectedOutlet =
+          selectedOutlets[order.id] ??
+          clientOutlet?.outlet_code ??
+          suggestedOutlet?.outlet_code ??
+          outlets[0]?.outlet_code ??
           '';
         const manualOverride = Boolean(
-          suggestedDepot?.depot_code && selectedDepot && selectedDepot !== suggestedDepot.depot_code,
+          suggestedOutlet?.outlet_code && selectedOutlet && selectedOutlet !== suggestedOutlet.outlet_code,
         );
         const isSharingThisOrder = sharingOrderId === order.id;
 
@@ -877,14 +932,14 @@ function PendingOrdersTab({
             <div className="flex flex-1 flex-wrap items-center justify-end gap-2">
               <div className="min-w-[220px] flex-1 sm:max-w-md">
                 <div className="mb-1 flex flex-wrap items-center gap-2">
-                  {suggestedDepot && (
+                  {suggestedOutlet && (
                     <span className="text-xs font-bold text-gold-700">
-                      Suggested: {suggestedDepot.name}
+                      Suggested: {suggestedOutlet.name}
                     </span>
                   )}
-                  {clientDepot && (
+                  {clientOutlet && (
                     <span className="rounded-full bg-brand-50 px-2 py-0.5 text-[11px] font-bold text-brand-700">
-                      Client selected: {clientDepot.name}
+                      Client selected: {clientOutlet.name}
                     </span>
                   )}
                   {manualOverride && (
@@ -894,19 +949,19 @@ function PendingOrdersTab({
                   )}
                 </div>
                 <select
-                  value={selectedDepot}
+                  value={selectedOutlet}
                   disabled={isSharingThisOrder}
                   onChange={(event) =>
-                    setSelectedDepots((current) => ({
+                    setSelectedOutlets((current) => ({
                       ...current,
                       [order.id]: event.target.value,
                     }))
                   }
                   className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700 outline-none transition focus:border-brand-400 focus:ring-2 focus:ring-brand-100 disabled:cursor-not-allowed disabled:bg-gray-100"
                 >
-                  {depots.map((depot) => (
-                    <option key={depot.depot_code} value={depot.depot_code}>
-                      {formatDepotOption(depot)}
+                  {outlets.map((outlet) => (
+                    <option key={outlet.outlet_code} value={outlet.outlet_code}>
+                      {formatOutletOption(outlet)}
                     </option>
                   ))}
                 </select>
@@ -918,8 +973,8 @@ function PendingOrdersTab({
               )}
               <button
                 type="button"
-                onClick={() => onShare(order, selectedDepot, suggestedDepot?.depot_code ?? null)}
-                disabled={!selectedDepot || isSharingThisOrder}
+                onClick={() => onShare(order, selectedOutlet, suggestedOutlet?.outlet_code ?? null)}
+                disabled={!selectedOutlet || isSharingThisOrder}
                 className="inline-flex items-center gap-1.5 rounded-full bg-brand-600 px-3 py-2 text-xs font-bold text-white transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:bg-gray-300"
               >
                 {isSharingThisOrder ? (
@@ -927,7 +982,7 @@ function PendingOrdersTab({
                 ) : (
                   <Share2 className="h-3.5 w-3.5" />
                 )}
-                Share to Depot
+                Share to Outlet
               </button>
             </div>
           </OrderShell>
@@ -940,50 +995,50 @@ function PendingOrdersTab({
 function AttendantQueueTab({
   orders,
   riders,
-  assignedDepot,
-  assignedDepotRecord,
+  assignedOutlet,
+  assignedOutletRecord,
   loading,
   onChangeStatus,
   onOpenDispatch,
   onPaidDelivered,
 }: {
   orders: Order[];
-  riders: DepotRider[];
-  assignedDepot: string;
-  assignedDepotRecord: Depot | null;
+  riders: OutletRider[];
+  assignedOutlet: string;
+  assignedOutletRecord: Outlet | null;
   loading: boolean;
   onChangeStatus: (order: Order, nextStatus: OrderStatus) => void;
   onOpenDispatch: (order: Order) => void;
   onPaidDelivered: (order: Order) => void;
 }) {
-  if (!assignedDepot) {
+  if (!assignedOutlet) {
     return (
       <EmptyState
         icon={<Building2 className="h-8 w-8" />}
-        title="No assigned depot"
-        text="Ask an admin to assign your attendant account to a depot."
+        title="No assigned outlet"
+        text="Ask an admin to assign your attendant account to an outlet."
       />
     );
   }
 
-  if (!assignedDepotRecord) {
+  if (!assignedOutletRecord) {
     return (
       <EmptyState
         icon={<Building2 className="h-8 w-8" />}
-        title="Invalid assigned depot"
-        text={`${assignedDepot} is not one of the five active SFM depot codes. Ask an admin to update this account.`}
+        title="Invalid assigned outlet"
+        text={`${assignedOutlet} is not one of the five active SFM outlet codes. Ask an admin to update this account.`}
       />
     );
   }
 
-  if (loading) return <LoadingState label="Loading depot queue..." />;
+  if (loading) return <LoadingState label="Loading outlet queue..." />;
 
   if (orders.length === 0) {
     return (
       <EmptyState
         icon={<ClipboardList className="h-8 w-8" />}
-        title="Depot queue is clear"
-        text="Shared orders for your assigned depot will appear here in real time."
+        title="Outlet queue is clear"
+        text="Shared orders for your assigned outlet will appear here in real time."
       />
     );
   }
@@ -991,9 +1046,9 @@ function AttendantQueueTab({
   return (
     <div className="mt-4 space-y-3">
       <div className="rounded-2xl border border-brand-100 bg-brand-50 px-4 py-3 text-sm font-semibold text-brand-800">
-        Assigned depot: {formatDepotOption(assignedDepotRecord)}
+        Assigned outlet: {formatOutletOption(assignedOutletRecord)}
         <span className="mt-1 block text-xs font-medium text-brand-700">
-          Covers: {formatDistributionAreas(assignedDepotRecord)}
+          Covers: {formatDistributionAreas(assignedOutletRecord)}
         </span>
       </div>
       {orders.map((order) => {
@@ -1022,7 +1077,7 @@ function AttendantQueueTab({
                 type="button"
                 onClick={() => onOpenDispatch(order)}
                 disabled={riders.length === 0}
-                className="inline-flex items-center gap-1.5 rounded-full bg-gold-500 px-3 py-1.5 text-xs font-bold text-brand-950 transition hover:bg-gold-400 disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-400"
+                className="inline-flex items-center gap-1.5 rounded-full bg-gold-500 px-3 py-1.5 text-xs font-bold text-white transition hover:bg-gold-400 disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-400"
               >
                 <Bike className="h-3.5 w-3.5" />
                 Dispatch Rider
@@ -1048,7 +1103,7 @@ function AttendantQueueTab({
 
 function AccountManagementTab({
   users,
-  depots,
+  outlets,
   open,
   onOpenChange,
   onReload,
@@ -1056,7 +1111,7 @@ function AccountManagementTab({
   onToast,
 }: {
   users: UserRoleProfile[];
-  depots: Depot[];
+  outlets: Outlet[];
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onReload: () => void;
@@ -1069,18 +1124,18 @@ function AccountManagementTab({
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [avatarPreviewUrl, setAvatarPreviewUrl] = useState('');
   const [role, setRole] = useState<'admin' | 'attendant'>('attendant');
-  const [assignedDepot, setAssignedDepot] = useState('');
+  const [assignedOutlet, setAssignedOutlet] = useState('');
   const [editingUser, setEditingUser] = useState<UserRoleProfile | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  const selectedAssignedDepot = findDepotByCode(depots, assignedDepot);
+  const selectedAssignedOutlet = findOutletByCode(outlets, assignedOutlet);
 
   const resetForm = () => {
     if (avatarPreviewUrl.startsWith('blob:')) URL.revokeObjectURL(avatarPreviewUrl);
     setEmail('');
     setFullName('');
     setPassword('');
-    setAssignedDepot('');
+    setAssignedOutlet('');
     setAvatarFile(null);
     setAvatarPreviewUrl('');
   };
@@ -1135,8 +1190,8 @@ function AccountManagementTab({
       return false;
     }
 
-    if (role === 'attendant' && !assignedDepot) {
-      setError('Select an assigned depot for this attendant.');
+    if (role === 'attendant' && !assignedOutlet) {
+      setError('Select an assigned outlet for this attendant.');
       return false;
     }
 
@@ -1147,7 +1202,7 @@ function AccountManagementTab({
       full_name: fullName.trim() || null,
       avatar_url: avatarUrl,
       role,
-      assigned_depot: role === 'attendant' ? assignedDepot : null,
+      assigned_outlet: role === 'attendant' ? assignedOutlet : null,
       is_approved: true,
       is_active: true,
       invited_by: 'local-free-access',
@@ -1184,7 +1239,7 @@ function AccountManagementTab({
         fullName,
         password,
         role,
-        assignedDepot,
+        assignedOutlet,
       }),
     });
 
@@ -1237,7 +1292,7 @@ function AccountManagementTab({
         <div>
           <h3 className="text-base font-bold text-gray-800">Admin &amp; Attendant Accounts</h3>
           <p className="text-xs text-gray-500">
-            Create depot attendants or additional admins. Auth admin calls run through a Netlify function.
+            Create outlet attendants or additional admins. Auth admin calls run through a Netlify function.
           </p>
         </div>
         <button
@@ -1273,7 +1328,7 @@ function AccountManagementTab({
                 onChange={(event) => {
                   const nextRole = event.target.value as 'admin' | 'attendant';
                   setRole(nextRole);
-                  if (nextRole === 'admin') setAssignedDepot('');
+                  if (nextRole === 'admin') setAssignedOutlet('');
                 }}
                 className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm outline-none transition focus:border-brand-400 focus:bg-white focus:ring-2 focus:ring-brand-100"
               >
@@ -1283,23 +1338,23 @@ function AccountManagementTab({
             </label>
             {role === 'attendant' && (
               <label className="block md:col-span-2">
-                <span className="mb-1 block text-xs font-semibold text-gray-600">Assigned Depot</span>
+                <span className="mb-1 block text-xs font-semibold text-gray-600">Assigned Outlet</span>
                 <select
-                  value={assignedDepot}
-                  onChange={(event) => setAssignedDepot(event.target.value)}
+                  value={assignedOutlet}
+                  onChange={(event) => setAssignedOutlet(event.target.value)}
                   required
                   className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm outline-none transition focus:border-brand-400 focus:bg-white focus:ring-2 focus:ring-brand-100"
                 >
-                  <option value="">Select depot</option>
-                  {depots.map((depot) => (
-                    <option key={depot.depot_code} value={depot.depot_code}>
-                      {formatDepotOption(depot)}
+                  <option value="">Select outlet</option>
+                  {outlets.map((outlet) => (
+                    <option key={outlet.outlet_code} value={outlet.outlet_code}>
+                      {formatOutletOption(outlet)}
                     </option>
                   ))}
                 </select>
-                {selectedAssignedDepot && (
+                {selectedAssignedOutlet && (
                   <p className="mt-1 text-xs font-medium text-gray-500">
-                    Covers: {formatDistributionAreas(selectedAssignedDepot)}
+                    Covers: {formatDistributionAreas(selectedAssignedOutlet)}
                   </p>
                 )}
               </label>
@@ -1324,7 +1379,7 @@ function AccountManagementTab({
               <tr>
                 <th className="px-4 py-3">User</th>
                 <th className="px-4 py-3">Role</th>
-                <th className="px-4 py-3">Depot</th>
+                <th className="px-4 py-3">Outlet</th>
                 <th className="px-4 py-3">Status</th>
                 <th className="px-4 py-3">Last Login</th>
                 <th className="px-4 py-3 text-right">Actions</th>
@@ -1344,11 +1399,11 @@ function AccountManagementTab({
                   </td>
                   <td className="px-4 py-3 capitalize">{adminUser.role}</td>
                   <td className="px-4 py-3">
-                    {adminUser.assigned_depot
-                      ? formatDepotOption(findDepotByCode(depots, adminUser.assigned_depot) ?? {
-                          depot_code: adminUser.assigned_depot,
-                          name: adminUser.assigned_depot,
-                          division: 'Unknown depot',
+                    {adminUser.assigned_outlet
+                      ? formatOutletOption(findOutletByCode(outlets, adminUser.assigned_outlet) ?? {
+                          outlet_code: adminUser.assigned_outlet,
+                          name: adminUser.assigned_outlet,
+                          division: 'Unknown outlet',
                           distribution_areas: [],
                           is_active: false,
                         })
@@ -1397,7 +1452,7 @@ function AccountManagementTab({
       {editingUser && (
         <EditAccountModal
           user={editingUser}
-          depots={depots}
+          outlets={outlets}
           onClose={() => setEditingUser(null)}
           onReload={onReload}
           onLocalUsersChange={onLocalUsersChange}
@@ -1410,14 +1465,14 @@ function AccountManagementTab({
 
 function EditAccountModal({
   user,
-  depots,
+  outlets,
   onClose,
   onReload,
   onLocalUsersChange,
   onToast,
 }: {
   user: UserRoleProfile;
-  depots: Depot[];
+  outlets: Outlet[];
   onClose: () => void;
   onReload: () => void;
   onLocalUsersChange: (users: UserRoleProfile[]) => void;
@@ -1427,12 +1482,12 @@ function EditAccountModal({
   const [role, setRole] = useState<'admin' | 'attendant'>(
     user.role === 'attendant' ? 'attendant' : 'admin',
   );
-  const [assignedDepot, setAssignedDepot] = useState(user.assigned_depot ?? '');
+  const [assignedOutlet, setAssignedOutlet] = useState(user.assigned_outlet ?? '');
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [avatarPreviewUrl, setAvatarPreviewUrl] = useState(user.avatar_url ?? '');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  const selectedAssignedDepot = findDepotByCode(depots, assignedDepot);
+  const selectedAssignedOutlet = findOutletByCode(outlets, assignedOutlet);
   const isLocalFreeUser = user.invited_by === 'local-free-access';
 
   const save = async (event: FormEvent) => {
@@ -1444,8 +1499,8 @@ function EditAccountModal({
       return;
     }
 
-    if (role === 'attendant' && !assignedDepot) {
-      setError('Select an assigned depot for this attendant.');
+    if (role === 'attendant' && !assignedOutlet) {
+      setError('Select an assigned outlet for this attendant.');
       return;
     }
 
@@ -1471,7 +1526,7 @@ function EditAccountModal({
       const patch: Partial<UserRoleProfile> = {
         full_name: fullName.trim(),
         role,
-        assigned_depot: role === 'attendant' ? assignedDepot : null,
+        assigned_outlet: role === 'attendant' ? assignedOutlet : null,
       };
 
       if (avatarChanged) {
@@ -1502,7 +1557,7 @@ function EditAccountModal({
           userId: user.user_id,
           fullName: fullName.trim(),
           role,
-          assignedDepot: role === 'attendant' ? assignedDepot : null,
+          assignedOutlet: role === 'attendant' ? assignedOutlet : null,
           avatarUrl,
         }),
       });
@@ -1530,7 +1585,7 @@ function EditAccountModal({
         <div className="flex items-start justify-between gap-3 border-b border-gray-100 pb-4">
           <div>
             <h2 className="text-base font-bold text-gray-800">Edit Account</h2>
-            <p className="text-xs text-gray-500">Update access details, depot assignment, and profile photo.</p>
+            <p className="text-xs text-gray-500">Update access details, outlet assignment, and profile photo.</p>
           </div>
           <button
             type="button"
@@ -1572,7 +1627,7 @@ function EditAccountModal({
               onChange={(event) => {
                 const nextRole = event.target.value as 'admin' | 'attendant';
                 setRole(nextRole);
-                if (nextRole === 'admin') setAssignedDepot('');
+                if (nextRole === 'admin') setAssignedOutlet('');
               }}
               className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm outline-none transition focus:border-brand-400 focus:bg-white focus:ring-2 focus:ring-brand-100"
             >
@@ -1582,23 +1637,23 @@ function EditAccountModal({
           </label>
           {role === 'attendant' && (
             <label className="block md:col-span-2">
-              <span className="mb-1 block text-xs font-semibold text-gray-600">Assigned Depot</span>
+              <span className="mb-1 block text-xs font-semibold text-gray-600">Assigned Outlet</span>
               <select
-                value={assignedDepot}
-                onChange={(event) => setAssignedDepot(event.target.value)}
+                value={assignedOutlet}
+                onChange={(event) => setAssignedOutlet(event.target.value)}
                 required
                 className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm outline-none transition focus:border-brand-400 focus:bg-white focus:ring-2 focus:ring-brand-100"
               >
-                <option value="">Select depot</option>
-                {depots.map((depot) => (
-                  <option key={depot.depot_code} value={depot.depot_code}>
-                    {formatDepotOption(depot)}
+                <option value="">Select outlet</option>
+                {outlets.map((outlet) => (
+                  <option key={outlet.outlet_code} value={outlet.outlet_code}>
+                    {formatOutletOption(outlet)}
                   </option>
                 ))}
               </select>
-              {selectedAssignedDepot && (
+              {selectedAssignedOutlet && (
                 <p className="mt-1 text-xs font-medium text-gray-500">
-                  Covers: {formatDistributionAreas(selectedAssignedDepot)}
+                  Covers: {formatDistributionAreas(selectedAssignedOutlet)}
                 </p>
               )}
             </label>
@@ -1638,17 +1693,17 @@ type ReportPreset = 'today' | 'week' | 'month' | 'custom';
 
 function ReportsTab({
   orders,
-  depots,
+  outlets,
   loading,
 }: {
   orders: Order[];
-  depots: Depot[];
+  outlets: Outlet[];
   loading: boolean;
 }) {
   const [preset, setPreset] = useState<ReportPreset>('today');
   const [customStart, setCustomStart] = useState(formatDateInput(new Date()));
   const [customEnd, setCustomEnd] = useState(formatDateInput(new Date()));
-  const [selectedDepot, setSelectedDepot] = useState('all');
+  const [selectedOutlet, setSelectedOutlet] = useState('all');
   const range = getReportDateRange(preset, customStart, customEnd);
 
   const completedSales = useMemo(() => {
@@ -1658,9 +1713,9 @@ function ReportsTab({
         const createdAt = new Date(order.created_at);
         return createdAt >= range.start && createdAt <= range.end;
       })
-      .filter((order) => selectedDepot === 'all' || order.depot_code === selectedDepot)
+      .filter((order) => selectedOutlet === 'all' || order.outlet_code === selectedOutlet)
       .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-  }, [orders, range.end, range.start, selectedDepot]);
+  }, [orders, range.end, range.start, selectedOutlet]);
 
   const totalSales = completedSales.reduce((sum, order) => sum + getOrderTotal(order), 0);
   const orderCount = completedSales.length;
@@ -1673,12 +1728,12 @@ function ReportsTab({
 
   const exportCsv = () => {
     const rows = [
-      ['Order ID', 'Date/Time', 'Client Name', 'Depot', 'Items', 'Total Amount', 'Payment Method'],
+      ['Order ID', 'Date/Time', 'Client Name', 'Outlet', 'Items', 'Total Amount', 'Payment Method'],
       ...completedSales.map((order) => [
         order.id,
         new Date(order.created_at).toLocaleString(),
         order.contact_name,
-        formatDepotName(order.depot_code, depots),
+        formatOutletName(order.outlet_code, outlets),
         formatItemsSummary(order),
         String(getOrderTotal(order)),
         getPaymentMethod(order),
@@ -1768,16 +1823,16 @@ function ReportsTab({
             </div>
           )}
           <label className="block">
-            <span className="mb-1 block text-xs font-semibold text-gray-600">Filter by Depot</span>
+            <span className="mb-1 block text-xs font-semibold text-gray-600">Filter by Outlet</span>
             <select
-              value={selectedDepot}
-              onChange={(event) => setSelectedDepot(event.target.value)}
+              value={selectedOutlet}
+              onChange={(event) => setSelectedOutlet(event.target.value)}
               className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm outline-none transition focus:border-brand-400 focus:bg-white focus:ring-2 focus:ring-brand-100"
             >
-              <option value="all">All Depots</option>
-              {depots.map((depot) => (
-                <option key={depot.depot_code} value={depot.depot_code}>
-                  {depot.hub_market || depot.name} ({depot.depot_code})
+              <option value="all">All Outlets</option>
+              {outlets.map((outlet) => (
+                <option key={outlet.outlet_code} value={outlet.outlet_code}>
+                  {outlet.hub_market || outlet.name} ({outlet.outlet_code})
                 </option>
               ))}
             </select>
@@ -1829,7 +1884,7 @@ function ReportsTab({
                     <th className="px-4 py-3">Order ID</th>
                     <th className="px-4 py-3">Date/Time</th>
                     <th className="px-4 py-3">Client</th>
-                    <th className="px-4 py-3">Depot</th>
+                    <th className="px-4 py-3">Outlet</th>
                     <th className="px-4 py-3">Items</th>
                     <th className="px-4 py-3">Total Amount</th>
                     <th className="px-4 py-3">Payment Method</th>
@@ -1841,7 +1896,7 @@ function ReportsTab({
                       <td className="px-4 py-3 font-semibold text-gray-800">#{order.id.slice(0, 8).toUpperCase()}</td>
                       <td className="px-4 py-3 text-gray-500">{new Date(order.created_at).toLocaleString()}</td>
                       <td className="px-4 py-3">{order.contact_name}</td>
-                      <td className="px-4 py-3 text-gray-500">{formatDepotName(order.depot_code, depots)}</td>
+                      <td className="px-4 py-3 text-gray-500">{formatOutletName(order.outlet_code, outlets)}</td>
                       <td className="px-4 py-3 text-gray-500">{formatItemsSummary(order)}</td>
                       <td className="px-4 py-3 font-bold text-brand-700">{formatUGX(getOrderTotal(order))}</td>
                       <td className="px-4 py-3 text-gray-500">{getPaymentMethod(order)}</td>
@@ -1857,48 +1912,48 @@ function ReportsTab({
   );
 }
 
-function AuditAndDepotPerformanceTab({
+function AuditAndOutletPerformanceTab({
   orders,
-  depots,
+  outlets,
   logs,
   users,
   loading,
 }: {
   orders: Order[];
-  depots: Depot[];
+  outlets: Outlet[];
   logs: AdminAuditLog[];
   users: UserRoleProfile[];
   loading: boolean;
 }) {
-  const performance = depots.map((depot) => {
-    const depotOrders = orders.filter((order) => order.depot_code === depot.depot_code);
+  const performance = outlets.map((outlet) => {
+    const outletOrders = orders.filter((order) => order.outlet_code === outlet.outlet_code);
     return {
-      depot,
-      total: depotOrders.length,
-      processing: depotOrders.filter((order) => order.order_status === 'Processing').length,
-      transit: depotOrders.filter((order) => order.order_status === 'Transit').length,
-      delivered: depotOrders.filter((order) => order.order_status === 'Delivered').length,
+      outlet,
+      total: outletOrders.length,
+      processing: outletOrders.filter((order) => order.order_status === 'Processing').length,
+      transit: outletOrders.filter((order) => order.order_status === 'Transit').length,
+      delivered: outletOrders.filter((order) => order.order_status === 'Delivered').length,
     };
   });
 
-  if (loading) return <LoadingState label="Loading depot performance..." />;
+  if (loading) return <LoadingState label="Loading outlet performance..." />;
 
   return (
     <div className="mt-4 grid gap-4 lg:grid-cols-[1fr_1.1fr]">
       <div className="space-y-3">
         {performance.map((item) => (
-          <div key={item.depot.depot_code} className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
+          <div key={item.outlet.outlet_code} className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <p className="font-bold text-gray-800">{item.depot.name}</p>
+                <p className="font-bold text-gray-800">{item.outlet.name}</p>
                 <p className="text-xs text-gray-500">
-                  {item.depot.depot_code} - {item.depot.division}
+                  {item.outlet.outlet_code} - {item.outlet.division}
                 </p>
               </div>
               <span className="rounded-full bg-brand-50 px-3 py-1 text-sm font-bold text-brand-700">{item.total}</span>
             </div>
             <p className="mt-2 text-xs text-gray-500">
-              Covers: {formatDistributionAreas(item.depot)}
+              Covers: {formatDistributionAreas(item.outlet)}
             </p>
             <div className="mt-3 grid grid-cols-3 gap-2 text-center text-xs">
               <Metric label="Processing" value={item.processing} />
@@ -1926,7 +1981,7 @@ function AuditAndDepotPerformanceTab({
                     </p>
                     <p className="mt-1 text-xs text-gray-500">
                       Actor: {formatAuditActor(log.actor_user_id, users, log)}
-                      {typeof log.metadata.depot_code === 'string' ? ` - Depot: ${log.metadata.depot_code}` : ''}
+                      {typeof log.metadata.outlet_code === 'string' ? ` - Outlet: ${log.metadata.outlet_code}` : ''}
                     </p>
                     {log.metadata.manual_override === true && (
                       <span className="mt-2 inline-flex rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-bold text-amber-700">
@@ -1951,9 +2006,9 @@ function RiderDispatchModal({
   onDispatch,
 }: {
   order: Order;
-  riders: DepotRider[];
+  riders: OutletRider[];
   onClose: () => void;
-  onDispatch: (rider: DepotRider) => void;
+  onDispatch: (rider: OutletRider) => void;
 }) {
   return (
     <div className="fixed inset-0 z-[70] flex items-end justify-center sm:items-center">
@@ -1972,12 +2027,12 @@ function RiderDispatchModal({
                   {rider.phone}
                 </a>
               </div>
-              <button type="button" onClick={() => onDispatch(rider)} className="rounded-full bg-gold-500 px-3 py-1.5 text-xs font-bold text-brand-950">
+              <button type="button" onClick={() => onDispatch(rider)} className="rounded-full bg-gold-500 px-3 py-1.5 text-xs font-bold text-white">
                 Dispatch
               </button>
             </div>
           ))}
-          {riders.length === 0 && <p className="text-sm text-gray-500">No riders configured for this depot.</p>}
+          {riders.length === 0 && <p className="text-sm text-gray-500">No riders configured for this outlet.</p>}
         </div>
       </div>
     </div>
@@ -2059,7 +2114,7 @@ function normalizeOrder(order: Order): Order {
     ...order,
     order_status: normalizedStatus,
     payment_status: order.payment_status ?? 'PENDING',
-    is_shared_with_depot: order.is_shared_with_depot ?? false,
+    is_shared_with_outlet: order.is_shared_with_outlet ?? false,
   };
 }
 
@@ -2067,26 +2122,26 @@ function isDemoOrder(order: Order) {
   return order.id.startsWith(DEMO_ORDER_PREFIX);
 }
 
-function getDemoOrdersForDashboard(isAttendant: boolean, assignedDepot?: string | null) {
+function getDemoOrdersForDashboard(isAttendant: boolean, assignedOutlet?: string | null) {
   const demoOrders = readDemoOrders().map(normalizeOrder);
   if (!isAttendant) return demoOrders;
 
   return demoOrders.filter(
     (order) =>
-      order.is_shared_with_depot &&
-      Boolean(assignedDepot) &&
-      order.depot_code === assignedDepot,
+      order.is_shared_with_outlet &&
+      Boolean(assignedOutlet) &&
+      order.outlet_code === assignedOutlet,
   );
 }
 
-function suggestDepotForOrder(order: Order, depots: Depot[]) {
-  return suggestDepotFromText(
-    depots,
+function suggestOutletForOrder(order: Order, outlets: Outlet[]) {
+  return suggestOutletFromText(
+    outlets,
     order.division,
     order.market_location,
     order.delivery_address,
-    order.suggested_depot_code,
-    order.depot_code,
+    order.suggested_outlet_code,
+    order.outlet_code,
   );
 }
 
@@ -2182,10 +2237,10 @@ function formatItemsSummary(order: Order) {
     .concat(order.items.length > 3 ? ` +${order.items.length - 3} more` : '');
 }
 
-function formatDepotName(depotCode: string | null | undefined, depots: Depot[]) {
-  if (!depotCode) return '-';
-  const depot = findDepotByCode(depots, depotCode);
-  return depot ? `${depot.hub_market || depot.name} (${depot.depot_code})` : depotCode;
+function formatOutletName(outletCode: string | null | undefined, outlets: Outlet[]) {
+  if (!outletCode) return '-';
+  const outlet = findOutletByCode(outlets, outletCode);
+  return outlet ? `${outlet.hub_market || outlet.name} (${outlet.outlet_code})` : outletCode;
 }
 
 function buildSalesTrend(orders: Order[], start: Date, end: Date, preset: ReportPreset) {
@@ -2274,6 +2329,882 @@ function TabButton({
   );
 }
 
+function SiteSettingsTab({
+  settings,
+  user,
+  profile,
+  onSettingsChanged,
+  onToast,
+  onAuditLogged,
+}: {
+  settings: SiteSettings;
+  user: SupabaseUser | null;
+  profile: UserRoleProfile | null;
+  onSettingsChanged: (settings: SiteSettings) => void;
+  onToast: (toast: { tone: 'success' | 'error'; message: string }) => void;
+  onAuditLogged: () => void;
+}) {
+  const [draft, setDraft] = useState<SiteSettings>(normalizeSiteSettings(settings));
+  const [records, setRecords] = useState<SiteSettingRecord[]>([]);
+  const [versions, setVersions] = useState<SiteContentVersion[]>([]);
+  const [settingsTab, setSettingsTab] = useState<'pages' | 'images' | 'style' | 'versions' | 'locked'>('pages');
+  const [saving, setSaving] = useState(false);
+  const [previewed, setPreviewed] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setDraft(normalizeSiteSettings(settings));
+    setPreviewed(false);
+  }, [settings]);
+
+  useEffect(() => {
+    void Promise.all([
+      fetchSiteSettingRecords(),
+      fetchSiteContentDraft(),
+      fetchSiteContentVersions(),
+    ]).then(([nextRecords, savedDraft, nextVersions]) => {
+      setRecords(nextRecords);
+      setVersions(nextVersions);
+      if (savedDraft) setDraft(savedDraft);
+    });
+  }, []);
+
+  const actorName = profile?.full_name || profile?.email || user?.email || 'Admin';
+
+  const updateDraft = <K extends keyof SiteSettings>(key: K, value: SiteSettings[K]) => {
+    setDraft((current) => ({ ...current, [key]: value }));
+    setPreviewed(false);
+    setError(null);
+  };
+
+  const updateCategory = (key: string, patch: Partial<CategoryContent>) => {
+    updateDraft(
+      'categories',
+      draft.categories.map((category) =>
+        category.key === key ? { ...category, ...patch } : category,
+      ),
+    );
+  };
+
+  const updateTrustBadge = (key: string, patch: Partial<TrustBadgeContent>) => {
+    updateDraft(
+      'trustBadges',
+      draft.trustBadges.map((badge) => (badge.key === key ? { ...badge, ...patch } : badge)),
+    );
+  };
+
+  const resetSection = (section: 'pages' | 'images' | 'style' | 'hover') => {
+    setDraft((current) => resetSettingsSection(current, section));
+    setPreviewed(false);
+    setError(null);
+  };
+
+  const saveDraft = async () => {
+    const validationError = validateSiteSettings(draft);
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
+
+    setSaving(true);
+    setError(null);
+
+    try {
+      const savedDraft = await saveSiteContentDraft(draft, user?.id ?? null, actorName);
+      setDraft(savedDraft);
+      onToast({ tone: 'success', message: 'Draft saved. Preview before publishing.' });
+    } catch (draftError) {
+      const message = draftError instanceof Error ? draftError.message : 'Could not save draft.';
+      setError(message);
+      onToast({ tone: 'error', message });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const previewChanges = () => {
+    const validationError = validateSiteSettings(draft);
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
+    applySiteSettings(draft);
+    onSettingsChanged(draft);
+    setPreviewed(true);
+    setError(null);
+  };
+
+  const publishChanges = async () => {
+    const validationError = validateSiteSettings(draft);
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
+
+    if (!previewed) {
+      setError('Preview changes before publishing them live.');
+      return;
+    }
+
+    if (!window.confirm('Publish this CMS draft to the live site?')) return;
+
+    setSaving(true);
+    setError(null);
+
+    const changes = Object.entries(draft)
+      .filter(([key, value]) => settings[key as keyof SiteSettings] !== value)
+      .map(([key, value]) => ({
+        setting_key: key,
+        old_value: settings[key as keyof SiteSettings],
+        new_value: value,
+      }));
+
+    try {
+      const published = await publishSiteSettings(draft, user?.id ?? null, actorName, changes);
+
+      await supabase.from('admin_audit_logs').insert({
+        actor_user_id: user?.id ?? null,
+        action: 'site_content_published',
+        target_type: 'site_content',
+        target_id: 'theme_content',
+        metadata: { changes, updated_by_name: actorName },
+      });
+
+      onSettingsChanged(published);
+      setRecords(await fetchSiteSettingRecords());
+      setVersions(await fetchSiteContentVersions());
+      onAuditLogged();
+      onToast({ tone: 'success', message: 'Site content published.' });
+    } catch (publishError) {
+      const message =
+        publishError instanceof Error ? publishError.message : 'Could not publish site content.';
+      setError(message);
+      onToast({ tone: 'error', message });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const rollbackVersion = async (version: SiteContentVersion) => {
+    if (!window.confirm(`Rollback live site content to version ${version.version_number}?`)) return;
+
+    setSaving(true);
+    setError(null);
+
+    try {
+      const published = await rollbackSiteSettings(version, user?.id ?? null, actorName);
+      await supabase.from('admin_audit_logs').insert({
+        actor_user_id: user?.id ?? null,
+        action: 'site_content_rollback',
+        target_type: 'site_content',
+        target_id: 'theme_content',
+        metadata: { rollback_to_version: version.version_number, updated_by_name: actorName },
+      });
+      setDraft(published);
+      onSettingsChanged(published);
+      setVersions(await fetchSiteContentVersions());
+      onAuditLogged();
+      onToast({ tone: 'success', message: `Rolled back to version ${version.version_number}.` });
+    } catch (rollbackError) {
+      const message =
+        rollbackError instanceof Error ? rollbackError.message : 'Could not rollback site content.';
+      setError(message);
+      onToast({ tone: 'error', message });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="mt-4 space-y-4">
+      <div className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-base font-extrabold text-gray-900">Site Settings</h2>
+            <p className="text-sm text-gray-500">
+              Edit safe branding, copy, and hover behavior without changing the site layout.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={saveDraft}
+              disabled={saving}
+              className="inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white px-4 py-2 text-sm font-bold text-gray-700 transition hover:bg-gray-50 disabled:bg-gray-100"
+            >
+              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+              Save Draft
+            </button>
+            <button
+              type="button"
+              onClick={previewChanges}
+              className="inline-flex items-center gap-2 rounded-full border border-brand-200 bg-brand-50 px-4 py-2 text-sm font-bold text-brand-700 transition hover:bg-brand-100"
+            >
+              <Eye className="h-4 w-4" /> Preview Changes
+            </button>
+            <button
+              type="button"
+              onClick={publishChanges}
+              disabled={saving || !previewed}
+              className="inline-flex items-center gap-2 rounded-full bg-brand-600 px-4 py-2 text-sm font-bold text-white transition hover:bg-brand-700 disabled:bg-gray-300"
+            >
+              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+              Publish Changes
+            </button>
+          </div>
+        </div>
+        {error && (
+          <p className="mt-3 rounded-xl bg-red-50 px-3 py-2 text-xs font-semibold text-red-600">
+            {error}
+          </p>
+        )}
+      </div>
+
+      <div className="no-scrollbar flex gap-2 overflow-x-auto border-b border-gray-200">
+        <SettingsTabButton active={settingsTab === 'pages'} onClick={() => setSettingsTab('pages')}>
+          <Pencil className="h-4 w-4" /> Pages
+        </SettingsTabButton>
+        <SettingsTabButton active={settingsTab === 'images'} onClick={() => setSettingsTab('images')}>
+          <ImagePlus className="h-4 w-4" /> Images
+        </SettingsTabButton>
+        <SettingsTabButton active={settingsTab === 'style'} onClick={() => setSettingsTab('style')}>
+          <Type className="h-4 w-4" /> Colors & Style
+        </SettingsTabButton>
+        <SettingsTabButton active={settingsTab === 'versions'} onClick={() => setSettingsTab('versions')}>
+          <History className="h-4 w-4" /> Versions
+        </SettingsTabButton>
+        <SettingsTabButton active={settingsTab === 'locked'} onClick={() => setSettingsTab('locked')}>
+          <Lock className="h-4 w-4" /> Locked
+        </SettingsTabButton>
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1.4fr)_minmax(320px,0.8fr)]">
+        <div className="space-y-4">
+          {settingsTab === 'pages' && (
+            <>
+              <SettingsSection
+                title="Homepage Hero"
+                note={formatSectionUpdated(records, ['global' as keyof SiteSettings])}
+                onReset={() => resetSection('pages')}
+              >
+                <div className="grid gap-3">
+                  <TextAreaField label="Top announcement" value={draft.announcementText} maxLength={180} onChange={(value) => updateDraft('announcementText', value)} />
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <TextField label="Hero eyebrow" value={draft.heroEyebrow} maxLength={60} onChange={(value) => updateDraft('heroEyebrow', value)} />
+                    <TextField label="Hero title" value={draft.heroTitle} maxLength={45} onChange={(value) => updateDraft('heroTitle', value)} />
+                    <TextField label="Hero highlight" value={draft.heroHighlight} maxLength={24} onChange={(value) => updateDraft('heroHighlight', value)} />
+                  </div>
+                  <TextAreaField label="Hero subtext" value={draft.heroBody} maxLength={220} onChange={(value) => updateDraft('heroBody', value)} />
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <TextField label="Primary button" value={draft.shopNowLabel} maxLength={24} onChange={(value) => updateDraft('shopNowLabel', value)} />
+                    <TextField label="Secondary button" value={draft.browseCategoriesLabel} maxLength={32} onChange={(value) => updateDraft('browseCategoriesLabel', value)} />
+                  </div>
+                </div>
+              </SettingsSection>
+
+              <SettingsSection title="Category Tiles" note="Edit labels, blurbs, and tile media." onReset={() => resetSection('pages')}>
+                <div className="grid gap-3">
+                  <TextField label="All category label" value={draft.allCategoryLabel} maxLength={20} onChange={(value) => updateDraft('allCategoryLabel', value)} />
+                  {draft.categories.map((category) => (
+                    <div key={category.key} className="rounded-2xl border border-gray-100 bg-gray-50 p-3">
+                      <p className="mb-3 text-xs font-extrabold uppercase tracking-wide text-gray-500">{category.key}</p>
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <TextField label="Display label" value={category.label} maxLength={32} onChange={(value) => updateCategory(category.key, { label: value })} />
+                        <TextField label="Short description" value={category.blurb} maxLength={80} onChange={(value) => updateCategory(category.key, { blurb: value })} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </SettingsSection>
+
+              <SettingsSection title="Trust Badges" note="Edit the footer trust strip." onReset={() => resetSection('pages')}>
+                <div className="grid gap-3">
+                  {draft.trustBadges.map((badge) => (
+                    <div key={badge.key} className="rounded-2xl border border-gray-100 bg-gray-50 p-3">
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <TextField label="Title" value={badge.title} maxLength={50} onChange={(value) => updateTrustBadge(badge.key, { title: value })} />
+                        <SelectField
+                          label="Fallback icon"
+                          value={badge.icon}
+                          options={[
+                            { value: 'truck', label: 'Truck' },
+                            { value: 'shield', label: 'Shield' },
+                            { value: 'clock', label: 'Clock' },
+                          ]}
+                          onChange={(value) => updateTrustBadge(badge.key, { icon: value as TrustBadgeContent['icon'] })}
+                        />
+                      </div>
+                      <TextAreaField label="Description" value={badge.description} maxLength={100} onChange={(value) => updateTrustBadge(badge.key, { description: value })} />
+                    </div>
+                  ))}
+                </div>
+              </SettingsSection>
+
+              <SettingsSection title="Footer" note="Edit footer copy, category list, contact details, and merchant block." onReset={() => resetSection('pages')}>
+                <div className="grid gap-3">
+                  <TextAreaField label="About text" value={draft.footerTagline} maxLength={220} onChange={(value) => updateDraft('footerTagline', value)} />
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <TextField label="Categories heading" value={draft.footerCategoriesTitle} maxLength={40} onChange={(value) => updateDraft('footerCategoriesTitle', value)} />
+                    <TextField label="Contact heading" value={draft.footerContactTitle} maxLength={40} onChange={(value) => updateDraft('footerContactTitle', value)} />
+                  </div>
+                  <TextAreaField label="Categories list" value={draft.footerCategories.join('\n')} maxLength={180} onChange={(value) => updateDraft('footerCategories', value.split('\n').map((item) => item.trim()).filter(Boolean))} />
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <TextField label="Phone" value={draft.footerPhone} maxLength={40} onChange={(value) => updateDraft('footerPhone', value)} />
+                    <TextField label="Email" value={draft.footerEmail} maxLength={80} onChange={(value) => updateDraft('footerEmail', value)} />
+                    <TextField label="Address" value={draft.footerAddress} maxLength={100} onChange={(value) => updateDraft('footerAddress', value)} />
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <TextField label="Shop keepers title" value={draft.footerShopkeepersTitle} maxLength={50} onChange={(value) => updateDraft('footerShopkeepersTitle', value)} />
+                    <TextField label="Payment line" value={draft.footerPaymentText} maxLength={80} onChange={(value) => updateDraft('footerPaymentText', value)} />
+                  </div>
+                  <TextAreaField label="Shop keepers text" value={draft.footerShopkeepersText} maxLength={180} onChange={(value) => updateDraft('footerShopkeepersText', value)} />
+                </div>
+              </SettingsSection>
+            </>
+          )}
+
+          {settingsTab === 'images' && (
+            <>
+              <SettingsSection title="Hero & Decorative Media" note="Upload JPG, PNG, or WebP assets. Replacing an image removes the previous site asset file." onReset={() => resetSection('images')}>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <SiteAssetUploader label="Hero background image" value={draft.heroBackgroundImageUrl} assetKey="hero-background" onChange={(value) => updateDraft('heroBackgroundImageUrl', value)} />
+                  <SiteAssetUploader label="Decorative product-adjacent image" value={draft.decorativeImageUrl} assetKey="decorative-product" onChange={(value) => updateDraft('decorativeImageUrl', value)} />
+                </div>
+              </SettingsSection>
+
+              <SettingsSection title="Category Tile Media" note="Default image is always used; hover image appears only when hover swap is enabled." onReset={() => resetSection('images')}>
+                <div className="grid gap-4">
+                  {draft.categories.map((category) => (
+                    <div key={category.key} className="rounded-2xl border border-gray-100 bg-gray-50 p-3">
+                      <p className="mb-3 text-sm font-extrabold text-gray-800">{category.label}</p>
+                      <div className="grid gap-4 sm:grid-cols-2">
+                        <SiteAssetUploader label="Default tile image" value={category.imageUrl} assetKey={`category-${category.key}-default`} onChange={(value) => updateCategory(category.key, { imageUrl: value })} />
+                        <SiteAssetUploader label="Hover tile image" value={category.hoverImageUrl} assetKey={`category-${category.key}-hover`} onChange={(value) => updateCategory(category.key, { hoverImageUrl: value })} />
+                      </div>
+                      <div className="mt-3">
+                        <ToggleField label="Enable hover image swap" checked={category.hoverSwapEnabled} onChange={(checked) => updateCategory(category.key, { hoverSwapEnabled: checked })} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </SettingsSection>
+
+              <SettingsSection title="Trust Badge Images" note="Optional custom images override the selected fallback icons." onReset={() => resetSection('images')}>
+                <div className="grid gap-4 sm:grid-cols-3">
+                  {draft.trustBadges.map((badge) => (
+                    <SiteAssetUploader key={badge.key} label={badge.title} value={badge.imageUrl} assetKey={`trust-${badge.key}`} onChange={(value) => updateTrustBadge(badge.key, { imageUrl: value })} />
+                  ))}
+                </div>
+              </SettingsSection>
+            </>
+          )}
+
+          {settingsTab === 'style' && (
+            <>
+              <SettingsSection title="Colors & Branding" note={formatSectionUpdated(records, ['global' as keyof SiteSettings])} onReset={() => resetSection('style')}>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <ColorField label="Primary brand color" value={draft.primaryColor} onChange={(value) => updateDraft('primaryColor', value)} />
+                  <ColorField label="Navigation bar color" value={draft.navigationBarColor} onChange={(value) => updateDraft('navigationBarColor', value)} />
+                  <ColorField label="Accent / secondary color" value={draft.accentColor} onChange={(value) => updateDraft('accentColor', value)} />
+                  <ColorField label="Button hover color" value={draft.buttonHoverColor} onChange={(value) => updateDraft('buttonHoverColor', value)} />
+                  <ColorField label="Nav link hover color" value={draft.navLinkHoverColor} onChange={(value) => updateDraft('navLinkHoverColor', value)} />
+                  <ColorField label="Page background" value={draft.pageBackgroundColor} onChange={(value) => updateDraft('pageBackgroundColor', value)} />
+                  <ColorField label="Surface / card background" value={draft.surfaceBackgroundColor} onChange={(value) => updateDraft('surfaceBackgroundColor', value)} />
+                </div>
+              </SettingsSection>
+
+              <SettingsSection title="Typography & Interaction States" note="Presets keep the live layout stable." onReset={() => resetSection('hover')}>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <SelectField
+                    label="Heading font scale"
+                    value={draft.headingScale}
+                    options={[
+                      { value: 'small', label: 'Small' },
+                      { value: 'medium', label: 'Medium' },
+                      { value: 'large', label: 'Large' },
+                    ]}
+                    onChange={(value) => updateDraft('headingScale', value as SiteSettings['headingScale'])}
+                  />
+                  <ToggleField label="Button scale on hover" checked={draft.buttonScaleHoverEnabled} onChange={(checked) => updateDraft('buttonScaleHoverEnabled', checked)} />
+                  <ToggleField label="Button shadow on hover" checked={draft.buttonShadowHoverEnabled} onChange={(checked) => updateDraft('buttonShadowHoverEnabled', checked)} />
+                  <ToggleField label="Card lift on hover" checked={draft.hoverLiftEnabled} onChange={(checked) => updateDraft('hoverLiftEnabled', checked)} />
+                  <ToggleField label="Card shadow on hover" checked={draft.cardShadowHoverEnabled} onChange={(checked) => updateDraft('cardShadowHoverEnabled', checked)} />
+                  <ToggleField label="Navigation hover state" checked={draft.navLinkHoverEnabled} onChange={(checked) => updateDraft('navLinkHoverEnabled', checked)} />
+                </div>
+              </SettingsSection>
+            </>
+          )}
+
+          {settingsTab === 'versions' && (
+            <SettingsSection title="Published Version History" note="The most recent 5-10 published versions are available for rollback." onReset={() => setVersions([])}>
+              <div className="space-y-3">
+                {versions.length === 0 ? (
+                  <p className="rounded-xl bg-gray-50 px-3 py-3 text-sm text-gray-500">No published versions yet.</p>
+                ) : (
+                  versions.map((version) => (
+                    <div key={version.id} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-gray-100 bg-gray-50 p-3">
+                      <div>
+                        <p className="text-sm font-extrabold text-gray-800">Version {version.version_number}</p>
+                        <p className="text-xs text-gray-500">
+                          Published by {version.published_by_name || 'Admin'} on {new Date(version.published_at || '').toLocaleString()}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => void rollbackVersion(version)}
+                        className="inline-flex items-center gap-1.5 rounded-full border border-brand-200 bg-white px-3 py-1.5 text-xs font-bold text-brand-700 transition hover:bg-brand-50"
+                      >
+                        <History className="h-3.5 w-3.5" />
+                        Roll Back
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+            </SettingsSection>
+          )}
+
+          {settingsTab === 'locked' && (
+            <SettingsSection title="Requires Developer Support" note="These areas stay code-only to protect checkout, routing, and database integrity." onReset={() => undefined}>
+              <div className="grid gap-3">
+                {[
+                  ['Page layout and section order', 'Changing layout can break responsive composition and merchant workflows.'],
+                  ['Navigation menu structure and routes', 'Routes control storefront, merchant dashboard, attendant workspace, cart, and checkout state.'],
+                  ['Checkout and cart logic', 'Payment, order creation, status flow, and Supabase writes must remain tested code.'],
+                  ['Database category values', 'Product filtering depends on stable category keys; display labels are editable instead.'],
+                  ['Role permissions and RLS policies', 'Access rules are security-critical and must be changed through migrations.'],
+                  ['Product data schema', 'Product fields affect catalog, order items, reports, and admin forms.'],
+                ].map(([title, reason]) => (
+                  <div key={title} className="rounded-2xl border border-amber-100 bg-amber-50 px-4 py-3">
+                    <p className="text-sm font-extrabold text-amber-900">{title}</p>
+                    <p className="mt-1 text-xs text-amber-700">{reason}</p>
+                  </div>
+                ))}
+              </div>
+            </SettingsSection>
+          )}
+        </div>
+
+        <div className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm lg:sticky lg:top-24 lg:self-start">
+          <p className="text-sm font-extrabold text-gray-900">Live Preview</p>
+          <p className="text-xs text-gray-500">Use Preview Changes to apply this draft across the current page.</p>
+          <div
+            className="mt-4 rounded-2xl border p-4"
+            style={{ backgroundColor: draft.pageBackgroundColor }}
+          >
+            <div
+              className="mb-3 flex items-center justify-between rounded-xl px-4 py-3 text-white"
+              style={{ backgroundColor: draft.navigationBarColor }}
+            >
+              <span className="text-sm font-extrabold">Shop For Me</span>
+              <span className="rounded-full px-3 py-1 text-xs font-bold" style={{ backgroundColor: draft.primaryColor }}>
+                Cart
+              </span>
+            </div>
+            <div className="rounded-2xl p-4 shadow-sm" style={{ backgroundColor: draft.surfaceBackgroundColor }}>
+              <span className="inline-flex rounded-full px-3 py-1 text-xs font-bold text-white" style={{ backgroundColor: draft.accentColor }}>
+                {draft.heroEyebrow}
+              </span>
+              <h3 className="mt-3 text-2xl font-extrabold text-gray-900">
+                {draft.heroTitle} <span style={{ color: draft.primaryColor }}>{draft.heroHighlight}</span>
+              </h3>
+              <p className="mt-2 text-sm text-gray-600">{draft.heroBody}</p>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  className="rounded-full px-4 py-2 text-sm font-bold text-white"
+                  style={{ backgroundColor: draft.primaryColor }}
+                >
+                  {draft.shopNowLabel}
+                </button>
+                <button
+                  type="button"
+                  className="rounded-full border px-4 py-2 text-sm font-bold"
+                  style={{ borderColor: draft.primaryColor, color: draft.primaryColor }}
+                >
+                  {draft.browseCategoriesLabel}
+                </button>
+              </div>
+            </div>
+            <div className="mt-3 grid grid-cols-3 gap-2">
+              {draft.categories.slice(0, 3).map((category) => {
+                const content = getCategoryContent(draft, category.key);
+                return (
+                  <div key={category.key} className="rounded-xl bg-white p-2 text-center text-[11px] font-bold text-gray-700 shadow-sm">
+                    {content?.imageUrl ? <img src={content.imageUrl} alt="" className="mx-auto mb-1 h-8 w-8 rounded-lg object-cover" /> : null}
+                    {category.label}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+          <p className="mt-4 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-700">
+            Drafts are private until Preview Changes and Publish Changes. Layout, routes, checkout, and database category keys remain developer-only.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SettingsSection({
+  title,
+  note,
+  onReset,
+  children,
+}: {
+  title: string;
+  note: string;
+  onReset: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-extrabold text-gray-900">{title}</h3>
+          <p className="text-xs text-gray-500">{note}</p>
+        </div>
+        <button
+          type="button"
+          onClick={onReset}
+          className="inline-flex items-center gap-1.5 rounded-full border border-gray-200 px-3 py-1.5 text-xs font-bold text-gray-600 transition hover:bg-gray-50"
+        >
+          <RotateCcw className="h-3.5 w-3.5" /> Reset to Default
+        </button>
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function SettingsTabButton({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex shrink-0 items-center gap-2 border-b-2 px-4 py-3 text-sm font-bold transition ${
+        active
+          ? 'border-brand-600 text-brand-700'
+          : 'border-transparent text-gray-500 hover:border-gray-200 hover:text-gray-800'
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
+function SelectField({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  options: Array<{ value: string; label: string }>;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="block">
+      <span className="mb-1 block text-xs font-semibold text-gray-600">{label}</span>
+      <select
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm font-semibold text-gray-800 outline-none transition focus:border-brand-400 focus:bg-white focus:ring-2 focus:ring-brand-100"
+      >
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+const SITE_ASSET_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+const SITE_ASSET_MAX_SIZE = 5 * 1024 * 1024;
+
+function SiteAssetUploader({
+  label,
+  value,
+  assetKey,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  assetKey: string;
+  onChange: (value: string) => void;
+}) {
+  const [dragActive, setDragActive] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState('');
+
+  const uploadFile = async (file?: File) => {
+    if (!file) return;
+
+    if (!SITE_ASSET_TYPES.includes(file.type)) {
+      setError('Upload a JPG, PNG, or WebP image.');
+      return;
+    }
+
+    if (file.size > SITE_ASSET_MAX_SIZE) {
+      setError('Image must be 5MB or smaller.');
+      return;
+    }
+
+    setUploading(true);
+    setError('');
+
+    const extension = file.name.split('.').pop()?.toLowerCase() || 'jpg';
+    const safeKey = assetKey
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '');
+    const path = `${safeKey || 'site-asset'}.${extension}`;
+    const previousPath = getSiteAssetPath(value);
+
+    const { error: uploadError } = await supabase.storage
+      .from('site-assets')
+      .upload(path, file, { upsert: true, contentType: file.type });
+
+    if (uploadError) {
+      setUploading(false);
+      setError(
+        uploadError.message.includes('Bucket not found')
+          ? 'Site asset storage is not set up yet. Apply the site-assets migration.'
+          : uploadError.message || 'Could not upload image.',
+      );
+      return;
+    }
+
+    if (previousPath && previousPath !== path) {
+      await supabase.storage.from('site-assets').remove([previousPath]);
+    }
+
+    const { data } = supabase.storage.from('site-assets').getPublicUrl(path);
+    onChange(`${data.publicUrl}?v=${Date.now()}`);
+    setUploading(false);
+  };
+
+  const clearImage = async () => {
+    const previousPath = getSiteAssetPath(value);
+    if (previousPath) {
+      await supabase.storage.from('site-assets').remove([previousPath]);
+    }
+    onChange('');
+    setError('');
+  };
+
+  return (
+    <div>
+      <div className="mb-1 flex items-center justify-between gap-3">
+        <span className="text-xs font-semibold text-gray-600">{label}</span>
+        <span className="text-[11px] text-gray-400">JPG, PNG, WebP up to 5MB</span>
+      </div>
+      <div
+        onDragOver={(event) => {
+          event.preventDefault();
+          setDragActive(true);
+        }}
+        onDragLeave={() => setDragActive(false)}
+        onDrop={(event) => {
+          event.preventDefault();
+          setDragActive(false);
+          void uploadFile(event.dataTransfer.files[0]);
+        }}
+        className={`rounded-2xl border border-dashed bg-white p-3 transition ${
+          dragActive ? 'border-brand-500 bg-brand-50' : 'border-gray-200'
+        }`}
+      >
+        {value ? (
+          <div className="overflow-hidden rounded-xl bg-gray-100">
+            <img src={value} alt="" className="h-36 w-full object-cover" />
+          </div>
+        ) : (
+          <div className="grid h-36 place-items-center rounded-xl bg-gray-50 text-center">
+            <div>
+              <ImagePlus className="mx-auto h-6 w-6 text-brand-600" />
+              <p className="mt-2 text-xs font-bold text-gray-600">Drop image here</p>
+            </div>
+          </div>
+        )}
+        <div className="mt-3 flex flex-wrap gap-2">
+          <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-gray-200 bg-white px-3 py-1.5 text-xs font-bold text-gray-700 transition hover:bg-brand-50">
+            {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
+            {value ? 'Replace' : 'Upload'}
+            <input
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              className="sr-only"
+              onChange={(event) => void uploadFile(event.target.files?.[0])}
+            />
+          </label>
+          {value && (
+            <button
+              type="button"
+              onClick={() => void clearImage()}
+              className="inline-flex items-center gap-1.5 rounded-full border border-red-100 bg-white px-3 py-1.5 text-xs font-bold text-red-600 transition hover:bg-red-50"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              Remove
+            </button>
+          )}
+        </div>
+        <label className="mt-3 block">
+          <span className="mb-1 flex items-center gap-1.5 text-xs font-semibold text-gray-600">
+            <Link className="h-3.5 w-3.5" />
+            Or paste image URL
+          </span>
+          <input
+            value={value}
+            onChange={(event) => onChange(event.target.value)}
+            placeholder="https://..."
+            className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-xs outline-none transition focus:border-brand-400 focus:bg-white focus:ring-2 focus:ring-brand-100"
+          />
+        </label>
+        {error && <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-xs font-medium text-red-600">{error}</p>}
+      </div>
+    </div>
+  );
+}
+
+function getSiteAssetPath(publicUrl: string) {
+  const marker = '/storage/v1/object/public/site-assets/';
+  const [urlWithoutQuery] = publicUrl.split('?');
+  const markerIndex = urlWithoutQuery.indexOf(marker);
+  if (markerIndex === -1) return '';
+  return decodeURIComponent(urlWithoutQuery.slice(markerIndex + marker.length));
+}
+
+function ColorField({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="block">
+      <span className="mb-1 block text-xs font-semibold text-gray-600">{label}</span>
+      <div className="flex items-center gap-2 rounded-xl border border-gray-200 bg-gray-50 px-2 py-2 focus-within:border-brand-400 focus-within:ring-2 focus-within:ring-brand-100">
+        <input
+          type="color"
+          value={value}
+          onChange={(event) => onChange(event.target.value.toUpperCase())}
+          className="h-9 w-11 shrink-0 cursor-pointer rounded-lg border-0 bg-transparent p-0"
+        />
+        <input
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          className="min-w-0 flex-1 bg-transparent text-sm font-semibold text-gray-800 outline-none"
+        />
+      </div>
+    </label>
+  );
+}
+
+function TextField({
+  label,
+  value,
+  maxLength,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  maxLength: number;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="block">
+      <span className="mb-1 flex items-center justify-between gap-2 text-xs font-semibold text-gray-600">
+        {label}
+        <span className="font-medium text-gray-400">{value.length}/{maxLength}</span>
+      </span>
+      <input
+        value={value}
+        maxLength={maxLength}
+        onChange={(event) => onChange(event.target.value)}
+        className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm outline-none transition focus:border-brand-400 focus:bg-white focus:ring-2 focus:ring-brand-100"
+      />
+    </label>
+  );
+}
+
+function TextAreaField({
+  label,
+  value,
+  maxLength,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  maxLength: number;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="block">
+      <span className="mb-1 flex items-center justify-between gap-2 text-xs font-semibold text-gray-600">
+        {label}
+        <span className="font-medium text-gray-400">{value.length}/{maxLength}</span>
+      </span>
+      <textarea
+        value={value}
+        maxLength={maxLength}
+        rows={3}
+        onChange={(event) => onChange(event.target.value)}
+        className="w-full resize-none rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm outline-none transition focus:border-brand-400 focus:bg-white focus:ring-2 focus:ring-brand-100"
+      />
+    </label>
+  );
+}
+
+function ToggleField({
+  label,
+  checked,
+  onChange,
+}: {
+  label: string;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <label className="flex items-center justify-between gap-3 rounded-2xl border border-gray-100 bg-gray-50 px-4 py-3">
+      <span className="text-sm font-semibold text-gray-700">{label}</span>
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(event) => onChange(event.target.checked)}
+        className="h-5 w-5 rounded border-gray-300 text-brand-600 focus:ring-brand-500"
+      />
+    </label>
+  );
+}
+
+function formatSectionUpdated(records: SiteSettingRecord[], keys: Array<keyof SiteSettings>) {
+  const newest = records
+    .filter((record) => keys.includes(record.setting_key))
+    .filter((record) => record.updated_at)
+    .sort((a, b) => new Date(b.updated_at || '').getTime() - new Date(a.updated_at || '').getTime())[0];
+
+  if (!newest) return 'Last updated: not published yet.';
+
+  return `Last updated by ${newest.updated_by_name || 'Admin'} on ${new Date(
+    newest.updated_at || '',
+  ).toLocaleString()}.`;
+}
+
 function OrdersTab({
   orders,
   loading,
@@ -2331,7 +3262,7 @@ function OrdersTab({
           <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
             <InfoLine
               icon={<Building2 className="h-3.5 w-3.5" />}
-              text={`Depot: ${o.depot_code || 'Awaiting share'}`}
+              text={`Outlet: ${o.outlet_code || 'Awaiting share'}`}
             />
             <InfoLine
               icon={<Users className="h-3.5 w-3.5" />}

@@ -49,15 +49,15 @@ export interface Order {
   status: string;
   order_status?: 'Order Received' | 'Pending' | 'Processing' | 'Transit' | 'Delivered' | 'Cancelled';
   payment_status?: 'PENDING' | 'PAID' | 'FAILED' | 'REFUNDED';
-  is_shared_with_depot?: boolean;
-  depot_code?: string | null;
+  is_shared_with_outlet?: boolean;
+  outlet_code?: string | null;
   division?: string | null;
   shared_at?: string | null;
   shared_by?: string | null;
   shared_by_admin_id?: string | null;
   shared_by_admin_name?: string | null;
-  manual_depot_override?: boolean | null;
-  suggested_depot_code?: string | null;
+  manual_outlet_override?: boolean | null;
+  suggested_outlet_code?: string | null;
   dispatched_rider_id?: string | null;
   dispatched_rider_name?: string | null;
   dispatched_at?: string | null;
@@ -67,8 +67,8 @@ export interface Order {
   created_at: string;
 }
 
-export interface Depot {
-  depot_code: string;
+export interface Outlet {
+  outlet_code: string;
   name: string;
   division: string;
   hub_market?: string | null;
@@ -77,9 +77,9 @@ export interface Depot {
   is_active: boolean;
 }
 
-export interface DepotRider {
+export interface OutletRider {
   id: string;
-  depot_code: string;
+  outlet_code: string;
   name: string;
   phone: string;
   is_active: boolean;
@@ -92,7 +92,7 @@ export interface UserRoleProfile {
   full_name?: string | null;
   avatar_url?: string | null;
   role: 'admin' | 'attendant' | 'merchant' | 'customer';
-  assigned_depot?: string | null;
+  assigned_outlet?: string | null;
   is_approved?: boolean;
   is_active?: boolean;
   invited_by?: string | null;

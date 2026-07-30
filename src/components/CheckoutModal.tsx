@@ -3,16 +3,16 @@ import { X, MapPin, User, Phone, CheckCircle2, Truck, Loader2, WalletCards } fro
 import { useCart } from '../context/CartContext';
 import { formatUGX } from '../lib/format';
 import { supabase } from '../lib/supabase';
-import type { Depot, Order } from '../types';
+import type { Outlet, Order } from '../types';
 import { DEMO_ORDER_PREFIX, updateDemoOrder } from '../lib/demoOrders';
 import { getStatusDisplay } from '../lib/orderStatus';
 import {
-  findDepotByCode,
-  formatDepotOption,
+  findOutletByCode,
+  formatOutletOption,
   formatDistributionAreas,
-  OFFICIAL_DEPOTS,
-  suggestDepotFromText,
-} from '../lib/depots';
+  OFFICIAL_OUTLETS,
+  suggestOutletFromText,
+} from '../lib/outlets';
 
 interface CheckoutModalProps {
   open: boolean;
@@ -42,54 +42,54 @@ export default function CheckoutModal({ open, onClose, onOrderPlaced, userId }: 
   const [phone, setPhone] = useState('');
   const [address, setAddress] = useState('');
   const [selectedArea, setSelectedArea] = useState('');
-  const [selectedDepotCode, setSelectedDepotCode] = useState('');
-  const [depots, setDepots] = useState<Depot[]>([]);
+  const [selectedOutletCode, setSelectedOutletCode] = useState('');
+  const [outlets, setOutlets] = useState<Outlet[]>([]);
   const [paymentMethod, setPaymentMethod] = useState('MTN MoMoPay - Till 700000');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const locationOptions = buildLocationOptions(depots);
+  const locationOptions = buildLocationOptions(outlets);
   const selectedLocation = locationOptions.find((option) => option.value === selectedArea);
-  const suggestedDepot = suggestDepotFromText(
-    depots,
+  const suggestedOutlet = suggestOutletFromText(
+    outlets,
     selectedLocation?.area,
     selectedLocation?.division,
     address,
   );
-  const selectedDepot = findDepotByCode(depots, selectedDepotCode);
-  const depotMismatch = Boolean(
+  const selectedOutlet = findOutletByCode(outlets, selectedOutletCode);
+  const outletMismatch = Boolean(
     selectedLocation &&
-      suggestedDepot?.depot_code &&
-      selectedDepotCode &&
-      suggestedDepot.depot_code !== selectedDepotCode,
+      suggestedOutlet?.outlet_code &&
+      selectedOutletCode &&
+      suggestedOutlet.outlet_code !== selectedOutletCode,
   );
 
   useEffect(() => {
     if (!open) return;
 
-    const loadDepots = async () => {
-      const { data, error: depotError } = await supabase
-        .from('depots')
+    const loadOutlets = async () => {
+      const { data, error: outletError } = await supabase
+        .from('outlets')
         .select('*')
         .eq('is_active', true)
-        .order('depot_code');
+        .order('outlet_code');
 
-      if (!depotError && data?.length) {
-        setDepots((data as Depot[]) ?? []);
+      if (!outletError && data?.length) {
+        setOutlets((data as Outlet[]) ?? []);
       } else {
-        setDepots(OFFICIAL_DEPOTS);
+        setOutlets(OFFICIAL_OUTLETS);
       }
     };
 
-    void loadDepots();
+    void loadOutlets();
   }, [open]);
 
   useEffect(() => {
     const location = locationOptions.find((option) => option.value === selectedArea);
     if (!location) return;
 
-    const matchedDepot = findDepotByCode(depots, location.depotCode);
-    if (matchedDepot) setSelectedDepotCode(matchedDepot.depot_code);
-  }, [depots, selectedArea]);
+    const matchedOutlet = findOutletByCode(outlets, location.outletCode);
+    if (matchedOutlet) setSelectedOutletCode(matchedOutlet.outlet_code);
+  }, [outlets, selectedArea]);
 
   if (!open) return null;
 
@@ -104,8 +104,8 @@ export default function CheckoutModal({ open, onClose, onOrderPlaced, userId }: 
       setError('Choose an area or type your pickup landmark.');
       return;
     }
-    if (!selectedDepotCode) {
-      setError('Please select your pickup depot.');
+    if (!selectedOutletCode) {
+      setError('Please select your pickup outlet.');
       return;
     }
     setSubmitting(true);
@@ -126,16 +126,16 @@ export default function CheckoutModal({ open, onClose, onOrderPlaced, userId }: 
       phone: phone.trim(),
       delivery_address: address.trim() || selectedLocation?.area || 'Pickup station to confirm',
       market_location: selectedLocation?.area ?? address.trim() ?? null,
-      depot_code: selectedDepot?.depot_code ?? selectedDepotCode,
-      division: selectedDepot?.division ?? null,
-      suggested_depot_code: suggestedDepot?.depot_code ?? selectedDepot?.depot_code ?? null,
+      outlet_code: selectedOutlet?.outlet_code ?? selectedOutletCode,
+      division: selectedOutlet?.division ?? null,
+      suggested_outlet_code: suggestedOutlet?.outlet_code ?? selectedOutlet?.outlet_code ?? null,
       subtotal,
       delivery_fee: DELIVERY_FEE,
       total_amount: total,
       payment_method: paymentMethod,
       payment_status: 'PENDING',
       order_status: 'Order Received',
-      is_shared_with_depot: false,
+      is_shared_with_outlet: false,
       user_id: userId ?? null,
       items: orderItems,
       status: 'Order Received',
@@ -148,7 +148,7 @@ export default function CheckoutModal({ open, onClose, onOrderPlaced, userId }: 
       setPhone('');
       setAddress('');
       setSelectedArea('');
-      setSelectedDepotCode('');
+      setSelectedOutletCode('');
       setPaymentMethod('MTN MoMoPay - Till 700000');
     };
 
@@ -294,24 +294,24 @@ export default function CheckoutModal({ open, onClose, onOrderPlaced, userId }: 
                 </select>
               </label>
               <label className="block">
-                <span className="mb-1 block text-xs font-semibold text-gray-600">Pickup Depot</span>
+                <span className="mb-1 block text-xs font-semibold text-gray-600">Pickup Outlet</span>
                 <select
-                  value={selectedDepotCode}
-                  onChange={(event) => setSelectedDepotCode(event.target.value)}
+                  value={selectedOutletCode}
+                  onChange={(event) => setSelectedOutletCode(event.target.value)}
                   className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm outline-none transition focus:border-brand-400 focus:bg-white focus:ring-2 focus:ring-brand-100"
                   required
                 >
-                  <option value="">Select pickup depot</option>
-                  {depots.map((depot) => (
-                    <option key={depot.depot_code} value={depot.depot_code}>
-                      {depot.hub_market || depot.name} - {depot.division}
+                  <option value="">Select pickup outlet</option>
+                  {outlets.map((outlet) => (
+                    <option key={outlet.outlet_code} value={outlet.outlet_code}>
+                      {outlet.hub_market || outlet.name} - {outlet.division}
                     </option>
                   ))}
                 </select>
               </label>
-              {depotMismatch && (
+              {outletMismatch && (
                 <p className="rounded-xl bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700">
-                  This is outside your area's usual depot - pickup may take slightly longer.
+                  This is outside your area's usual outlet - pickup may take slightly longer.
                 </p>
               )}
               <Field
@@ -322,16 +322,16 @@ export default function CheckoutModal({ open, onClose, onOrderPlaced, userId }: 
                 placeholder="e.g. near Kalerwe stage"
                 textarea
               />
-              {selectedDepot && (
+              {selectedOutlet && (
                 <div className="rounded-xl bg-brand-50 px-3 py-2.5 text-sm">
                   <p className="font-bold text-brand-800">
-                    Your order will be handled by {selectedDepot.hub_market || selectedDepot.name}.
+                    Your order will be handled by {selectedOutlet.hub_market || selectedOutlet.name}.
                   </p>
                   <p className="mt-1 text-xs font-medium text-brand-700">
-                    {formatDepotOption(selectedDepot)}
+                    {formatOutletOption(selectedOutlet)}
                   </p>
                   <p className="mt-1 text-xs text-brand-700">
-                    Covers: {formatDistributionAreas(selectedDepot)}
+                    Covers: {formatDistributionAreas(selectedOutlet)}
                   </p>
                 </div>
               )}
@@ -340,7 +340,7 @@ export default function CheckoutModal({ open, onClose, onOrderPlaced, userId }: 
                 <span className="font-extrabold text-brand-700">{formatUGX(DELIVERY_FEE)}</span>
               </div>
               <p className="text-xs font-medium text-gray-500">
-                Flat rate, all areas. Estimated dispatch: same day, based on depot availability.
+                Flat rate, all areas. Estimated dispatch: same day, based on outlet availability.
               </p>
             </div>
           </section>
@@ -386,7 +386,7 @@ export default function CheckoutModal({ open, onClose, onOrderPlaced, userId }: 
 
           <button
             type="submit"
-            disabled={submitting || items.length === 0 || !selectedDepotCode}
+            disabled={submitting || items.length === 0 || !selectedOutletCode}
             className="mt-5 flex w-full items-center justify-center gap-2 rounded-full bg-brand-600 py-3 text-sm font-bold text-white shadow-md transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:bg-gray-300"
           >
             {submitting ? (
@@ -447,13 +447,13 @@ function Field({
   );
 }
 
-function buildLocationOptions(depots: Depot[]) {
-  return depots.flatMap((depot) =>
-    depot.distribution_areas.map((area) => ({
-      value: `${depot.depot_code}:${area}`,
+function buildLocationOptions(outlets: Outlet[]) {
+  return outlets.flatMap((outlet) =>
+    outlet.distribution_areas.map((area) => ({
+      value: `${outlet.outlet_code}:${area}`,
       area,
-      depotCode: depot.depot_code,
-      division: depot.division,
+      outletCode: outlet.outlet_code,
+      division: outlet.division,
     })),
   );
 }
@@ -507,11 +507,11 @@ export function OrderConfirmation({
       <div className="relative w-full max-w-md overflow-hidden rounded-3xl bg-white shadow-2xl animate-scale-in">
         <div className="bg-gradient-to-br from-brand-600 to-brand-800 px-6 py-8 text-center text-white">
           <div className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-white/20 ring-4 ring-white/30">
-            <CheckCircle2 className="h-9 w-9 text-gold-300" />
+            <CheckCircle2 className="h-9 w-9 text-brand-200" />
           </div>
           <h2 className="mt-4 text-xl font-extrabold">Order Received!</h2>
           <p className="mt-1 text-sm text-brand-50/90">
-            Thank you, {currentOrder.contact_name}. A depot team will process your order.
+            Thank you, {currentOrder.contact_name}. An outlet team will process your order.
           </p>
         </div>
         <div className="px-6 py-5">

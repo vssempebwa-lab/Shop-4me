@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import { Briefcase, Loader2, LockKeyhole, Mail, X } from 'lucide-react';
 import type { MerchantSignInResult } from '../hooks/useAuth';
+import shopForMeLogo from '../../Admin-Pics/shop for me logo free.png';
 
 interface MerchantSignInModalProps {
   open: boolean;
@@ -96,6 +97,11 @@ export default function MerchantSignInModal({
         <div className="border-b border-gray-100 bg-brand-50/70 px-5 py-4">
           <div className="flex items-start justify-between gap-4">
             <div>
+              <img
+                src={shopForMeLogo}
+                alt="Shop For Me Uganda"
+                className="mb-3 h-14 w-40 object-contain object-left"
+              />
               <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1 text-xs font-bold text-brand-700 shadow-sm ring-1 ring-brand-100">
                 <Briefcase className="h-3.5 w-3.5" />
                 Merchant Portal
@@ -175,7 +181,7 @@ export default function MerchantSignInModal({
           <button
             type="submit"
             disabled={loading}
-            className="flex w-full items-center justify-center gap-2 rounded-full bg-gold-500 px-4 py-3 text-sm font-extrabold text-brand-950 shadow-md transition hover:bg-gold-400 focus:outline-none focus:ring-2 focus:ring-gold-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:bg-gray-300 disabled:text-gray-600"
+            className="flex w-full items-center justify-center gap-2 rounded-full bg-gold-500 px-4 py-3 text-sm font-extrabold text-white shadow-md transition hover:bg-gold-400 focus:outline-none focus:ring-2 focus:ring-gold-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:bg-gray-300 disabled:text-gray-600"
           >
             {loading ? (
               <>
