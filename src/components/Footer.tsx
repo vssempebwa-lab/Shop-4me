@@ -1,13 +1,19 @@
-import { ShoppingCart, Phone, Mail, MapPin, Truck, ShieldCheck, Clock } from 'lucide-react';
+import { Briefcase, ShoppingCart, Phone, Mail, MapPin, Truck, ShieldCheck, Clock } from 'lucide-react';
 import { MerchantToggle } from './Header';
 
 interface FooterProps {
   merchantMode: boolean;
   merchantRole: boolean;
   onToggleMerchant: () => void;
+  onMerchantSignIn: () => void;
 }
 
-export default function Footer({ merchantMode, merchantRole, onToggleMerchant }: FooterProps) {
+export default function Footer({
+  merchantMode,
+  merchantRole,
+  onToggleMerchant,
+  onMerchantSignIn,
+}: FooterProps) {
   return (
     <footer className="mt-12 border-t border-gray-100 bg-white">
       {/* Trust strip */}
@@ -70,9 +76,14 @@ export default function Footer({ merchantMode, merchantRole, onToggleMerchant }:
               {merchantRole ? (
                 <MerchantToggle merchantMode={merchantMode} onToggle={onToggleMerchant} />
               ) : (
-                <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4 text-sm text-gray-500">
-                  Sign in with an authorized merchant account to access dashboard controls.
-                </div>
+                <button
+                  type="button"
+                  onClick={onMerchantSignIn}
+                  className="flex w-full items-center justify-center gap-2 rounded-2xl bg-gold-500 px-4 py-3 text-sm font-extrabold text-brand-950 shadow-sm transition hover:bg-gold-400 focus:outline-none focus:ring-2 focus:ring-gold-500 focus:ring-offset-2"
+                >
+                  <Briefcase className="h-4 w-4" />
+                  Sign in as Merchant
+                </button>
               )}
             </div>
           </div>

@@ -10,7 +10,7 @@ interface CartDrawerProps {
   user: User | null;
 }
 
-export default function CartDrawer({ open, onClose, onCheckout, user }: CartDrawerProps) {
+export default function CartDrawer({ open, onClose, onCheckout }: CartDrawerProps) {
   const { items, subtotal, increment, decrement, remove, count } = useCart();
 
   return (
@@ -129,19 +129,14 @@ export default function CartDrawer({ open, onClose, onCheckout, user }: CartDraw
               <span className="text-xl font-extrabold text-brand-700">{formatUGX(subtotal)}</span>
             </div>
             <p className="mt-1 text-xs text-gray-500">
-              Delivery fee calculated at checkout. Pay via MTN / Airtel Mobile Money.
+              Flat UGX 5,000 delivery fee. Pay on delivery via MTN or Airtel Merchant Till.
             </p>
-            {!user && (
-              <p className="mt-3 rounded-2xl bg-yellow-50 p-3 text-sm text-yellow-700">
-                Sign in first to place your order and save your history.
-              </p>
-            )}
+            <p className="mt-3 rounded-2xl bg-brand-50 p-3 text-sm font-medium text-brand-700">
+              No sign-in required. Enter your phone number at checkout so the depot can confirm your order.
+            </p>
             <button
               onClick={onCheckout}
-              disabled={!user}
-              className={`mt-3 flex w-full items-center justify-center gap-2 rounded-full py-3 text-sm font-bold text-white shadow-md transition ${
-                user ? 'bg-brand-600 hover:bg-brand-700' : 'cursor-not-allowed bg-gray-300'
-              }`}
+              className="mt-3 flex w-full items-center justify-center gap-2 rounded-full bg-brand-600 py-3 text-sm font-bold text-white shadow-md transition hover:bg-brand-700"
             >
               Checkout <ArrowRight className="h-4 w-4" />
             </button>

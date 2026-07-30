@@ -6,9 +6,12 @@ import ProductGrid, { HeroSection, CategoryHighlights } from './components/Produ
 import CartDrawer from './components/CartDrawer';
 import CheckoutModal, { OrderConfirmation } from './components/CheckoutModal';
 import MerchantDashboard from './components/MerchantDashboard';
+import MerchantSignInModal from './components/MerchantSignInModal';
+import AttendantWorkspace from './components/AttendantWorkspace';
 import { CartProvider } from './context/CartContext';
 import { hasSupabaseConfig, supabase } from './lib/supabase';
 import { useAuth } from './hooks/useAuth';
+import { getLatestLocalAttendant } from './lib/localAdminUsers';
 import type { Category, Order, Product } from './types';
 
 function App() {
@@ -20,24 +23,97 @@ function App() {
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [placedOrder, setPlacedOrder] = useState<Order | null>(null);
   const [merchantMode, setMerchantMode] = useState(false);
+  const [attendantMode, setAttendantMode] = useState(false);
+  const [merchantLoginOpen, setMerchantLoginOpen] = useState(false);
   const [dbError, setDbError] = useState<string | null>(null);
 
   const {
     user,
     role,
+    profile,
+    loading: authLoading,
     signInWithGoogle,
     signInWithEmail,
+    signInWithMerchant,
     signUpWithEmail,
     signOut,
   } = useAuth();
 
-  const merchantRole = role === 'admin' || role === 'attendant';
+  const freeMerchantAccess = true;
+  const localAttendant = freeMerchantAccess ? getLatestLocalAttendant() : null;
+  const merchantRole =
+    freeMerchantAccess ||
+    (profile?.is_active !== false &&
+      profile?.is_approved !== false &&
+      (role === 'admin' || role === 'attendant' || role === 'merchant'));
+
+  const navigateToMerchantDashboard = () => {
+    window.history.pushState({}, '', '/merchant/dashboard');
+    setAttendantMode(false);
+    setMerchantMode(true);
+  };
+
+  const navigateToAttendantWorkspace = () => {
+    window.history.pushState({}, '', '/attendant/workspace');
+    setMerchantMode(false);
+    setAttendantMode(true);
+  };
+
+  const navigateToStorefront = () => {
+    window.history.pushState({}, '', '/');
+    setMerchantMode(false);
+    setAttendantMode(false);
+  };
 
   useEffect(() => {
     if (!merchantRole) {
       setMerchantMode(false);
     }
   }, [merchantRole]);
+
+  useEffect(() => {
+    const syncRoute = () => {
+      const merchantPath = window.location.pathname.startsWith('/merchant');
+      const attendantPath = window.location.pathname.startsWith('/attendant');
+      if (!merchantPath && !attendantPath) return;
+
+      if (attendantPath) {
+        if (freeMerchantAccess || role === 'attendant') {
+          setAttendantMode(true);
+          setMerchantMode(false);
+          setMerchantLoginOpen(false);
+          return;
+        }
+
+        if (!authLoading) {
+          if (role === 'admin' || role === 'merchant') {
+            navigateToMerchantDashboard();
+          } else {
+            navigateToStorefront();
+          }
+        }
+        return;
+      }
+
+      if (merchantRole) {
+        setMerchantMode(true);
+        setAttendantMode(false);
+        setMerchantLoginOpen(false);
+        return;
+      }
+
+      if (!authLoading) {
+        setMerchantMode(false);
+        setAttendantMode(false);
+        setMerchantLoginOpen(true);
+        window.history.replaceState({}, '', '/');
+      }
+    };
+
+    syncRoute();
+    window.addEventListener('popstate', syncRoute);
+    return () => window.removeEventListener('popstate', syncRoute);
+  }, [authLoading, merchantRole]);
 
   const loadProducts = async () => {
     setLoading(true);
@@ -86,9 +162,54 @@ function App() {
           onCustomerLogout={signOut}
         />
 
-        {merchantMode && merchantRole ? (
+        {attendantMode ? (
           <main className="flex-1">
-            <MerchantDashboard products={products} onProductsChanged={loadProducts} />
+            <AttendantWorkspace
+              profile={
+                role === 'attendant'
+                  ? profile
+                  : localAttendant
+                    ? {
+                        ...localAttendant,
+                        assigned_depot: localAttendant.assigned_depot || 'DEPOT-KAW-01',
+                      }
+                  : {
+                      user_id: '00000000-0000-4000-8000-000000000001',
+                      email: 'attendant@shop4me.local',
+                      full_name: 'Local Market Attendant',
+                      role: 'attendant',
+                      assigned_depot: 'DEPOT-KAW-01',
+                      is_active: true,
+                      is_approved: true,
+                    }
+              }
+              sessionStartedAt={
+                role === 'attendant'
+                  ? profile?.last_login_at
+                  : localAttendant?.last_login_at ?? localAttendant?.created_at ?? new Date().toISOString()
+              }
+              onLogout={signOut}
+              onRedirectToAdmin={navigateToMerchantDashboard}
+              onRedirectToStorefront={navigateToStorefront}
+            />
+          </main>
+        ) : merchantMode && merchantRole ? (
+          <main className="flex-1">
+            <MerchantDashboard
+              products={products}
+              user={user}
+              role={freeMerchantAccess ? 'admin' : role}
+              profile={
+                profile ?? {
+                  user_id: '00000000-0000-4000-8000-000000000002',
+                  role: 'admin',
+                  is_active: true,
+                  is_approved: true,
+                }
+              }
+              onOpenAttendantWorkspace={navigateToAttendantWorkspace}
+              onProductsChanged={loadProducts}
+            />
           </main>
         ) : (
           <main className="flex-1">
@@ -132,12 +253,17 @@ function App() {
         <Footer
           merchantMode={merchantMode}
           merchantRole={merchantRole}
+          onMerchantSignIn={() => setMerchantLoginOpen(true)}
           onToggleMerchant={() => {
             if (!merchantRole) {
               setMerchantMode(false);
               return;
             }
-            setMerchantMode((v) => !v);
+            if (merchantMode) {
+              navigateToStorefront();
+            } else {
+              navigateToMerchantDashboard();
+            }
           }}
         />
 
@@ -151,7 +277,11 @@ function App() {
                   setMerchantMode(false);
                   return;
                 }
-                setMerchantMode((v) => !v);
+                if (merchantMode) {
+                  navigateToStorefront();
+                } else {
+                  navigateToMerchantDashboard();
+                }
               }}
             />
           </div>
@@ -178,6 +308,15 @@ function App() {
         {placedOrder && (
           <OrderConfirmation order={placedOrder} onClose={() => setPlacedOrder(null)} />
         )}
+        <MerchantSignInModal
+          open={merchantLoginOpen}
+          onClose={() => setMerchantLoginOpen(false)}
+          onSignIn={signInWithMerchant}
+          onSuccess={() => {
+            setMerchantLoginOpen(false);
+            navigateToMerchantDashboard();
+          }}
+        />
       </div>
     </CartProvider>
   );

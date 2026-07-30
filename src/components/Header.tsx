@@ -21,7 +21,7 @@ interface HeaderProps {
   onOpenCart: () => void;
   onNavigateHelp: () => void;
   user: User | null;
-  role: 'admin' | 'attendant' | 'customer' | null;
+  role: 'admin' | 'attendant' | 'merchant' | 'customer' | null;
   merchantRole: boolean;
   onToggleMerchant: () => void;
   onCustomerLogin: () => void;
@@ -333,7 +333,7 @@ export function MerchantToggle({
       className="group flex items-center gap-2.5 rounded-full border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 shadow-sm transition hover:border-brand-300 hover:bg-brand-50"
     >
       <span className={merchantMode ? 'text-brand-700' : 'text-gray-500'}>
-        {merchantMode ? 'Admin View' : 'Customer View'}
+        {merchantMode ? 'Merchant View' : 'Customer View'}
       </span>
       <span
         className={`relative inline-flex h-5 w-9 items-center rounded-full transition ${

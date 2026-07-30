@@ -1,19 +1,26 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import type { User } from '@supabase/supabase-js';
+import type { UserRoleProfile } from '../types';
 
-export type AppRole = 'admin' | 'attendant' | 'customer' | null;
+export type AppRole = 'admin' | 'attendant' | 'merchant' | 'customer' | null;
+export type MerchantSignInResult =
+  | { ok: true }
+  | { ok: false; reason: 'invalid_credentials' | 'not_authorized' | 'not_approved' };
+
+const MERCHANT_ROLES: AppRole[] = ['admin', 'attendant', 'merchant'];
 
 export function useAuth() {
   const [user, setUser] = useState<User | null>(null);
   const [role, setRole] = useState<AppRole>(null);
+  const [profile, setProfile] = useState<UserRoleProfile | null>(null);
   const [loading, setLoading] = useState(true);
 
   const fetchRole = async (userId: string) => {
     try {
       const { data, error } = await supabase
         .from('user_roles')
-        .select('role')
+        .select('id,user_id,email,full_name,avatar_url,role,assigned_depot,is_approved,is_active,invited_by,last_login_at,created_at,deactivated_at')
         .eq('user_id', userId)
         .maybeSingle();
 
@@ -23,6 +30,8 @@ export function useAuth() {
       }
 
       if (data?.role) {
+        setProfile(data as UserRoleProfile);
+        void supabase.rpc('touch_last_login');
         return data.role as AppRole;
       }
 
@@ -35,6 +44,12 @@ export function useAuth() {
         console.error('Failed to create default user role', insertError);
       }
 
+      setProfile({
+        user_id: userId,
+        role: 'customer',
+        is_active: true,
+        is_approved: false,
+      });
       return 'customer' as AppRole;
     } catch (err) {
       console.error('Role lookup failed', err);
@@ -50,6 +65,7 @@ export function useAuth() {
         setRole(await fetchRole(session.user.id));
       } else {
         setRole(null);
+        setProfile(null);
       }
       setLoading(false);
     };
@@ -64,6 +80,7 @@ export function useAuth() {
         setRole(await fetchRole(session.user.id));
       } else {
         setRole(null);
+        setProfile(null);
       }
       setLoading(false);
     });
@@ -89,6 +106,54 @@ export function useAuth() {
     return error;
   };
 
+  const signInAsMerchant = async (
+    emailOrPhone: string,
+    password: string,
+  ): Promise<MerchantSignInResult> => {
+    const normalizedLogin = emailOrPhone.trim();
+    const credentials = normalizedLogin.includes('@')
+      ? { email: normalizedLogin, password }
+      : { phone: normalizedLogin, password };
+
+    const { data, error } = await supabase.auth.signInWithPassword(credentials);
+
+    if (error || !data.user) {
+      return { ok: false, reason: 'invalid_credentials' };
+    }
+
+    const { data: roleData, error: roleError } = await supabase
+      .from('user_roles')
+      .select('id,user_id,email,full_name,avatar_url,role,assigned_depot,is_approved,is_active,invited_by,last_login_at,created_at,deactivated_at')
+      .eq('user_id', data.user.id)
+      .maybeSingle();
+
+    if (
+      roleError ||
+      !roleData ||
+      roleData.is_active === false ||
+      !MERCHANT_ROLES.includes(roleData.role as AppRole)
+    ) {
+      await supabase.auth.signOut();
+      setUser(null);
+      setRole(null);
+      setProfile(null);
+      return { ok: false, reason: 'not_authorized' };
+    }
+
+    if (!roleData.is_approved) {
+      await supabase.auth.signOut();
+      setUser(null);
+      setRole(null);
+      setProfile(null);
+      return { ok: false, reason: 'not_approved' };
+    }
+
+    setUser(data.user);
+    setRole(roleData.role as AppRole);
+    setProfile(roleData as UserRoleProfile);
+    return { ok: true };
+  };
+
   const signUpWithEmail = async (email: string, password: string) => {
     const { error } = await supabase.auth.signUp({
       email,
@@ -101,7 +166,18 @@ export function useAuth() {
   const signOut = async () => {
     await supabase.auth.signOut();
     setRole(null);
+    setProfile(null);
   };
 
-  return { user, role, loading, signInWithGoogle, signInWithEmail, signUpWithEmail, signOut };
+  return {
+    user,
+    role,
+    profile,
+    loading,
+    signInWithGoogle,
+    signInWithEmail,
+    signInWithMerchant: signInAsMerchant,
+    signUpWithEmail,
+    signOut,
+  };
 }
