@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
+import type { User } from '@supabase/supabase-js';
 import {
   Search,
   ShoppingCart,
-  User,
+  User as UserIcon,
   HelpCircle,
   ChevronDown,
   MapPin,
@@ -19,12 +20,13 @@ interface HeaderProps {
   onSearchChange: (v: string) => void;
   onOpenCart: () => void;
   onNavigateHelp: () => void;
-  attendantLoggedIn: boolean;
-  onAttendantLogin: () => void;
-  onAttendantLogout: () => void;
-  customerLoggedIn: boolean;
-  customerEmail: string;
+  user: User | null;
+  role: 'admin' | 'attendant' | 'customer' | null;
+  merchantRole: boolean;
+  onToggleMerchant: () => void;
   onCustomerLogin: () => void;
+  onCustomerSignIn: (email: string, password: string) => Promise<unknown>;
+  onCustomerSignUp: (email: string, password: string) => Promise<unknown>;
   onCustomerLogout: () => void;
 }
 
@@ -33,21 +35,23 @@ export default function Header({
   onSearchChange,
   onOpenCart,
   onNavigateHelp,
-  attendantLoggedIn,
-  onAttendantLogin,
-  onAttendantLogout,
-  customerLoggedIn,
-  customerEmail,
+  user,
+  role,
+  merchantRole,
+  onToggleMerchant,
   onCustomerLogin,
+  onCustomerSignIn,
+  onCustomerSignUp,
   onCustomerLogout,
 }: HeaderProps) {
   const { count } = useCart();
   const [accountOpen, setAccountOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
-  const [attendantUsername, setAttendantUsername] = useState('');
-  const [attendantPassword, setAttendantPassword] = useState('');
-  const [attendantError, setAttendantError] = useState('');
+  const [authEmail, setAuthEmail] = useState('');
+  const [authPassword, setAuthPassword] = useState('');
+  const [authError, setAuthError] = useState('');
+  const [showSignUp, setShowSignUp] = useState(false);
   const accountRef = useRef<HTMLDivElement>(null);
   const helpRef = useRef<HTMLDivElement>(null);
 
@@ -163,77 +167,51 @@ export default function Header({
                   onClick={() => setAccountOpen((v) => !v)}
                   className="flex items-center gap-1.5 rounded-full px-3 py-2 text-sm font-medium text-gray-600 transition hover:bg-gray-100 hover:text-brand-700"
                 >
-                  <User className="h-5 w-5" />
+                  <UserIcon className="h-5 w-5" />
                   <span className="hidden md:inline">Account</span>
                   <ChevronDown className={`hidden h-3.5 w-3.5 md:inline transition ${accountOpen ? 'rotate-180' : ''}`} />
                 </button>
                 {accountOpen && (
                   <div className="absolute right-0 mt-2 w-72 rounded-2xl border border-gray-100 bg-white p-2 shadow-xl animate-scale-in">
                     <div className="px-3 py-2">
-                      <p className="text-sm font-semibold text-gray-800">Admin Access</p>
-                      <p className="text-xs text-gray-500">Use your admin credentials to access the admin dashboard</p>
+                      <p className="text-sm font-semibold text-gray-800">Account</p>
+                      <p className="text-xs text-gray-500">
+                        Sign in with Google or email/password to place orders and access merchant tools if authorized.
+                      </p>
                     </div>
-                    <div className="my-1 h-px bg-gray-100" />
-                    {!attendantLoggedIn ? (
-                      <form
-                        onSubmit={(e) => {
-                          e.preventDefault();
-                          if (attendantUsername === 'admin' && attendantPassword === 'shop4me2026') {
-                            onAttendantLogin();
-                            setAttendantError('');
-                            setAccountOpen(false);
-                          } else {
-                            setAttendantError('Invalid admin username or password.');
-                          }
-                        }}
-                        className="space-y-2 p-1"
-                      >
-                        <input
-                          value={attendantUsername}
-                          onChange={(e) => setAttendantUsername(e.target.value)}
-                          placeholder="Admin Username"
-                          className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm outline-none transition focus:border-brand-400 focus:bg-white"
-                        />
-                        <input
-                          type="password"
-                          value={attendantPassword}
-                          onChange={(e) => setAttendantPassword(e.target.value)}
-                          placeholder="Admin Password"
-                          className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm outline-none transition focus:border-brand-400 focus:bg-white"
-                        />
-                        {attendantError && (
-                          <p className="text-xs font-medium text-red-600">{attendantError}</p>
-                        )}
-                        <button type="submit" className="w-full rounded-xl bg-brand-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-brand-700">
-                          Sign In as Admin
-                        </button>
-                      </form>
-                    ) : (
+                    <div className="my-2 h-px bg-gray-100" />
+                    {user ? (
                       <div className="space-y-2 p-1">
-                        <p className="rounded-xl bg-brand-50 px-3 py-2 text-sm font-medium text-brand-700">Admin access granted</p>
+                        <div className="rounded-xl bg-brand-50 px-3 py-2 text-sm font-medium text-brand-700">
+                          <p>Signed in as {user.email ?? 'Customer'}</p>
+                          <p className="text-xs text-gray-500">Role: {role ?? 'customer'}</p>
+                        </div>
+                        {merchantRole && (
+                          <button
+                            onClick={() => {
+                              onToggleMerchant();
+                              setAccountOpen(false);
+                            }}
+                            className="w-full rounded-xl bg-brand-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-brand-700"
+                          >
+                            Open Merchant Dashboard
+                          </button>
+                        )}
                         <button
                           onClick={() => {
-                            onAttendantLogout();
-                            setAttendantUsername('');
-                            setAttendantPassword('');
-                            setAttendantError('');
+                            onCustomerLogout();
+                            setAccountOpen(false);
+                            setAuthError('');
                           }}
                           className="w-full rounded-xl px-3 py-2 text-sm font-medium text-gray-600 transition hover:bg-gray-100"
                         >
                           Sign Out
                         </button>
                       </div>
-                    )}
-
-                    <div className="my-2 h-px bg-gray-100" />
-
-                    <div className="px-3 py-2">
-                      <p className="text-sm font-semibold text-gray-800">Customer Access</p>
-                      <p className="text-xs text-gray-500">Sign in with your Google account to browse and place orders</p>
-                    </div>
-                    {!customerLoggedIn ? (
-                      <div className="space-y-2 p-1">
+                    ) : (
+                      <div className="space-y-3 p-1">
                         <button
+                          type="button"
                           onClick={() => {
                             onCustomerLogin();
                             setAccountOpen(false);
@@ -248,20 +226,73 @@ export default function Header({
                           </svg>
                           Sign in with Google
                         </button>
-                      </div>
-                    ) : (
-                      <div className="space-y-2 p-1">
-                        <p className="rounded-xl bg-brand-50 px-3 py-2 text-sm font-medium text-brand-700">
-                          Signed in as {customerEmail}
-                        </p>
-                        <button
-                          onClick={() => {
-                            onCustomerLogout();
-                          }}
-                          className="w-full rounded-xl px-3 py-2 text-sm font-medium text-gray-600 transition hover:bg-gray-100"
-                        >
-                          Sign Out
-                        </button>
+                        <div className="rounded-2xl bg-gray-50 p-3">
+                          <div className="flex items-center justify-between gap-3">
+                            <button
+                              type="button"
+                              onClick={() => setShowSignUp(false)}
+                              className={`flex-1 rounded-full px-3 py-2 text-sm font-semibold transition ${showSignUp ? 'bg-white text-gray-600' : 'bg-brand-600 text-white'}`}
+                            >
+                              Sign In
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setShowSignUp(true)}
+                              className={`flex-1 rounded-full px-3 py-2 text-sm font-semibold transition ${showSignUp ? 'bg-brand-600 text-white' : 'bg-white text-gray-600'}`}
+                            >
+                              Sign Up
+                            </button>
+                          </div>
+                          <form
+                            onSubmit={async (e) => {
+                              e.preventDefault();
+                              setAuthError('');
+                              if (!authEmail.trim() || !authPassword.trim()) {
+                                setAuthError('Email and password are required.');
+                                return;
+                              }
+                              const error = showSignUp
+                                ? await onCustomerSignUp(authEmail.trim(), authPassword)
+                                : await onCustomerSignIn(authEmail.trim(), authPassword);
+                              if (error) {
+                                setAuthError((error as { message?: string })?.message || 'Authentication failed.');
+                                return;
+                              }
+                              setAccountOpen(false);
+                              setAuthEmail('');
+                              setAuthPassword('');
+                            }}
+                            className="mt-3 space-y-3"
+                          >
+                            <label className="block text-xs font-semibold text-gray-600">
+                              Email
+                              <input
+                                type="email"
+                                value={authEmail}
+                                onChange={(e) => setAuthEmail(e.target.value)}
+                                className="mt-1 w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-brand-400 focus:ring-2 focus:ring-brand-100"
+                              />
+                            </label>
+                            <label className="block text-xs font-semibold text-gray-600">
+                              Password
+                              <input
+                                type="password"
+                                value={authPassword}
+                                onChange={(e) => setAuthPassword(e.target.value)}
+                                className="mt-1 w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-brand-400 focus:ring-2 focus:ring-brand-100"
+                              />
+                            </label>
+                            {authError && (
+                              <p className="text-xs font-medium text-red-600">{authError}</p>
+                            )}
+                            <button
+                              type="submit"
+                              className="w-full rounded-xl bg-brand-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-brand-700"
+                            >
+                              {showSignUp ? 'Create Account' : 'Sign In'}
+                            </button>
+                          </form>
+                        </div>
                       </div>
                     )}
                   </div>

@@ -39,8 +39,11 @@ export interface Order {
   contact_name: string;
   phone: string;
   delivery_address: string;
+  market_location?: string;
+  user_id?: string | null;
   items: OrderItem[];
   subtotal: number;
+  delivery_fee?: number;
   status: string;
   created_at: string;
 }

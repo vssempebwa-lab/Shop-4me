@@ -1,4 +1,5 @@
 import { X, Plus, Minus, Trash2, ShoppingBag, ArrowRight } from 'lucide-react';
+import type { User } from '@supabase/supabase-js';
 import { useCart } from '../context/CartContext';
 import { formatUGX } from '../lib/format';
 
@@ -6,9 +7,10 @@ interface CartDrawerProps {
   open: boolean;
   onClose: () => void;
   onCheckout: () => void;
+  user: User | null;
 }
 
-export default function CartDrawer({ open, onClose, onCheckout }: CartDrawerProps) {
+export default function CartDrawer({ open, onClose, onCheckout, user }: CartDrawerProps) {
   const { items, subtotal, increment, decrement, remove, count } = useCart();
 
   return (
@@ -129,9 +131,17 @@ export default function CartDrawer({ open, onClose, onCheckout }: CartDrawerProp
             <p className="mt-1 text-xs text-gray-500">
               Delivery fee calculated at checkout. Pay via MTN / Airtel Mobile Money.
             </p>
+            {!user && (
+              <p className="mt-3 rounded-2xl bg-yellow-50 p-3 text-sm text-yellow-700">
+                Sign in first to place your order and save your history.
+              </p>
+            )}
             <button
               onClick={onCheckout}
-              className="mt-3 flex w-full items-center justify-center gap-2 rounded-full bg-brand-600 py-3 text-sm font-bold text-white shadow-md transition hover:bg-brand-700"
+              disabled={!user}
+              className={`mt-3 flex w-full items-center justify-center gap-2 rounded-full py-3 text-sm font-bold text-white shadow-md transition ${
+                user ? 'bg-brand-600 hover:bg-brand-700' : 'cursor-not-allowed bg-gray-300'
+              }`}
             >
               Checkout <ArrowRight className="h-4 w-4" />
             </button>

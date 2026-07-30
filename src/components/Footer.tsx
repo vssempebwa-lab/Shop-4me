@@ -3,10 +3,11 @@ import { MerchantToggle } from './Header';
 
 interface FooterProps {
   merchantMode: boolean;
+  merchantRole: boolean;
   onToggleMerchant: () => void;
 }
 
-export default function Footer({ merchantMode, onToggleMerchant }: FooterProps) {
+export default function Footer({ merchantMode, merchantRole, onToggleMerchant }: FooterProps) {
   return (
     <footer className="mt-12 border-t border-gray-100 bg-white">
       {/* Trust strip */}
@@ -66,7 +67,13 @@ export default function Footer({ merchantMode, onToggleMerchant }: FooterProps) 
               Switch to the merchant view to manage products, prices and orders.
             </p>
             <div className="mt-3">
-              <MerchantToggle merchantMode={merchantMode} onToggle={onToggleMerchant} />
+              {merchantRole ? (
+                <MerchantToggle merchantMode={merchantMode} onToggle={onToggleMerchant} />
+              ) : (
+                <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4 text-sm text-gray-500">
+                  Sign in with an authorized merchant account to access dashboard controls.
+                </div>
+              )}
             </div>
           </div>
         </div>

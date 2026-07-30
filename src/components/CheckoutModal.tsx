@@ -9,13 +9,17 @@ interface CheckoutModalProps {
   open: boolean;
   onClose: () => void;
   onOrderPlaced: (order: Order) => void;
+  userId?: string | null;
 }
 
-export default function CheckoutModal({ open, onClose, onOrderPlaced }: CheckoutModalProps) {
+export default function CheckoutModal({ open, onClose, onOrderPlaced, userId }: CheckoutModalProps) {
   const { items, subtotal, clear } = useCart();
+  const DELIVERY_FEE = 5000;
+  const total = subtotal + DELIVERY_FEE;
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [address, setAddress] = useState('');
+  const [marketLocation, setMarketLocation] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -24,6 +28,10 @@ export default function CheckoutModal({ open, onClose, onOrderPlaced }: Checkout
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setError(null);
+    if (!userId) {
+      setError('Please sign in to place your order.');
+      return;
+    }
     if (!name.trim() || !phone.trim() || !address.trim()) {
       setError('Please fill in all fields.');
       return;
@@ -44,10 +52,14 @@ export default function CheckoutModal({ open, onClose, onOrderPlaced }: Checkout
         contact_name: name.trim(),
         phone: phone.trim(),
         delivery_address: address.trim(),
+        market_location: marketLocation.trim() || null,
         subtotal,
+        delivery_fee: DELIVERY_FEE,
+        user_id: userId ?? null,
+        items: orderItems,
         status: 'Dispatched to Doorstep',
       })
-      .select()
+      .select('*')
       .single();
 
     if (insertError || !orderData) {
@@ -73,6 +85,8 @@ export default function CheckoutModal({ open, onClose, onOrderPlaced }: Checkout
     onOrderPlaced({
       ...orderData,
       items: orderItems,
+      market_location: orderData.market_location ?? marketLocation,
+      user_id: orderData.user_id ?? userId ?? null,
     } as Order);
     clear();
     setName('');
@@ -117,9 +131,19 @@ export default function CheckoutModal({ open, onClose, onOrderPlaced }: Checkout
                 </div>
               ))}
             </div>
-            <div className="mt-3 flex items-center justify-between border-t border-brand-200/60 pt-3">
-              <span className="text-sm font-semibold text-gray-700">Subtotal</span>
-              <span className="text-lg font-extrabold text-brand-700">{formatUGX(subtotal)}</span>
+            <div className="mt-3 space-y-2 border-t border-brand-200/60 pt-3">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-semibold text-gray-700">Subtotal</span>
+                <span className="text-gray-800">{formatUGX(subtotal)}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-semibold text-gray-700">Delivery Fee</span>
+                <span className="text-gray-800">{formatUGX(DELIVERY_FEE)}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-semibold text-gray-700">Total</span>
+                <span className="text-lg font-extrabold text-brand-700">{formatUGX(total)}</span>
+              </div>
             </div>
           </div>
 
@@ -151,6 +175,13 @@ export default function CheckoutModal({ open, onClose, onOrderPlaced }: Checkout
               placeholder="Plot, street, area, town"
               textarea
             />
+            <Field
+              icon={<MapPin className="h-4 w-4" />}
+              label="Market / Location"
+              value={marketLocation}
+              onChange={setMarketLocation}
+              placeholder="e.g. Nakawa Market / Kisenyi"
+            />
           </div>
 
           {error && (
@@ -169,7 +200,7 @@ export default function CheckoutModal({ open, onClose, onOrderPlaced }: Checkout
                 <Loader2 className="h-4 w-4 animate-spin" /> Placing order...
               </>
             ) : (
-              <>Place Order — {formatUGX(subtotal)}</>
+              <>Place Order — {formatUGX(total)}</>
             )}
           </button>
         </form>
@@ -254,9 +285,17 @@ export function OrderConfirmation({
             <Row label="Delivery to" value={order.delivery_address} />
             <Row label="Items" value={`${order.items.length} item(s)`} />
             <div className="flex items-center justify-between border-t border-gray-100 pt-2">
+              <span className="text-sm text-gray-500">Subtotal</span>
+              <span className="text-gray-800">{formatUGX(order.subtotal)}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-gray-500">Delivery Fee</span>
+              <span className="text-gray-800">{formatUGX(order.delivery_fee ?? 0)}</span>
+            </div>
+            <div className="flex items-center justify-between">
               <span className="font-semibold text-gray-700">Total</span>
               <span className="text-lg font-extrabold text-brand-700">
-                {formatUGX(order.subtotal)}
+                {formatUGX((order.subtotal ?? 0) + (order.delivery_fee ?? 0))}
               </span>
             </div>
           </div>

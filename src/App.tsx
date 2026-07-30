@@ -21,9 +21,23 @@ function App() {
   const [placedOrder, setPlacedOrder] = useState<Order | null>(null);
   const [merchantMode, setMerchantMode] = useState(false);
   const [dbError, setDbError] = useState<string | null>(null);
-  const [attendantLoggedIn, setAttendantLoggedIn] = useState(false);
 
-  const { user, signInWithGoogle, signOut } = useAuth();
+  const {
+    user,
+    role,
+    signInWithGoogle,
+    signInWithEmail,
+    signUpWithEmail,
+    signOut,
+  } = useAuth();
+
+  const merchantRole = role === 'admin' || role === 'attendant';
+
+  useEffect(() => {
+    if (!merchantRole) {
+      setMerchantMode(false);
+    }
+  }, [merchantRole]);
 
   const loadProducts = async () => {
     setLoading(true);
@@ -62,22 +76,17 @@ function App() {
           onSearchChange={setSearch}
           onOpenCart={() => setCartOpen(true)}
           onNavigateHelp={() => setCartOpen(false)}
-          attendantLoggedIn={attendantLoggedIn}
-          onAttendantLogin={() => {
-            setAttendantLoggedIn(true);
-            setMerchantMode(true);
-          }}
-          onAttendantLogout={() => {
-            setAttendantLoggedIn(false);
-            setMerchantMode(false);
-          }}
-          customerLoggedIn={!!user}
-          customerEmail={user?.email ?? ''}
-          onCustomerLogin={() => signInWithGoogle()}
+          user={user}
+          role={role}
+          merchantRole={merchantRole}
+          onToggleMerchant={() => setMerchantMode((value) => !value)}
+          onCustomerLogin={signInWithGoogle}
+          onCustomerSignIn={signInWithEmail}
+          onCustomerSignUp={signUpWithEmail}
           onCustomerLogout={signOut}
         />
 
-        {merchantMode && attendantLoggedIn ? (
+        {merchantMode && merchantRole ? (
           <main className="flex-1">
             <MerchantDashboard products={products} onProductsChanged={loadProducts} />
           </main>
@@ -122,8 +131,9 @@ function App() {
 
         <Footer
           merchantMode={merchantMode}
+          merchantRole={merchantRole}
           onToggleMerchant={() => {
-            if (!attendantLoggedIn) {
+            if (!merchantRole) {
               setMerchantMode(false);
               return;
             }
@@ -132,18 +142,20 @@ function App() {
         />
 
         {/* Floating merchant toggle (mobile-friendly, always reachable) */}
-        <div className="fixed bottom-4 right-4 z-30 sm:hidden">
-          <MerchantToggle
-            merchantMode={merchantMode}
-            onToggle={() => {
-              if (!attendantLoggedIn) {
-                setMerchantMode(false);
-                return;
-              }
-              setMerchantMode((v) => !v);
-            }}
-          />
-        </div>
+        {merchantRole && (
+          <div className="fixed bottom-4 right-4 z-30 sm:hidden">
+            <MerchantToggle
+              merchantMode={merchantMode}
+              onToggle={() => {
+                if (!merchantRole) {
+                  setMerchantMode(false);
+                  return;
+                }
+                setMerchantMode((v) => !v);
+              }}
+            />
+          </div>
+        )}
 
         <CartDrawer
           open={cartOpen}
@@ -152,6 +164,7 @@ function App() {
             setCartOpen(false);
             setCheckoutOpen(true);
           }}
+          user={user}
         />
         <CheckoutModal
           open={checkoutOpen}
@@ -160,6 +173,7 @@ function App() {
             setCheckoutOpen(false);
             setPlacedOrder(o);
           }}
+          userId={user?.id}
         />
         {placedOrder && (
           <OrderConfirmation order={placedOrder} onClose={() => setPlacedOrder(null)} />

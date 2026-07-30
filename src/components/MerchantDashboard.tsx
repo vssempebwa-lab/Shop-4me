@@ -83,6 +83,13 @@ export default function MerchantDashboard({
     }
   };
 
+  const handleSendToAttendant = async (orderId: string) => {
+    const { error } = await supabase.from('orders').update({ status: 'Assigned to Attendant' }).eq('id', orderId);
+    if (!error) {
+      setOrders((current) => current.map((order) => (order.id === orderId ? { ...order, status: 'Assigned to Attendant' } : order)));
+    }
+  };
+
   return (
     <section className="mx-auto max-w-7xl px-4 py-8">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -260,9 +267,17 @@ function OrdersTab({
                   <option value="Confirmed">Confirmed</option>
                   <option value="Packed">Packed</option>
                   <option value="Out for Delivery">Out for Delivery</option>
-                  <option value="Delivered">Delivered</option>
+                      <option value="Assigned to Attendant">Assigned to Attendant</option>
+                      <option value="Delivered">Delivered</option>
                 </select>
               </label>
+              <button
+                onClick={() => void handleSendToAttendant(o.id)}
+                className="mr-2 rounded-full bg-gold-50 px-3 py-1 text-xs font-semibold text-gold-700 transition hover:bg-gold-100"
+              >
+                Send to Attendant
+              </button>
+
               <span className="inline-flex items-center gap-1 rounded-full bg-brand-50 px-2.5 py-1 text-xs font-semibold text-brand-700 ring-1 ring-brand-200">
                 <CheckCircle2 className="h-3.5 w-3.5" /> {o.status}
               </span>

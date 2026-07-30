@@ -6,9 +6,10 @@ create table if not exists customer_credentials (
   created_at timestamptz not null default now()
 );
 
-insert into customer_credentials (full_name, email, password_hash)
-values ('Demo Customer', 'customer@shop4me.com', 'shop4me2026')
-on conflict (email) do nothing;
+-- Legacy credentials seed removed for security. Use Supabase Auth and user_roles instead.
+-- insert into customer_credentials (full_name, email, password_hash)
+-- values ('Demo Customer', 'customer@shop4me.com', 'shop4me2026')
+-- on conflict (email) do nothing;
 
 alter table customer_credentials enable row level security;
 

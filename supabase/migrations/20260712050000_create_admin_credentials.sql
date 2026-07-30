@@ -6,9 +6,10 @@ create table if not exists admin_credentials (
   created_at timestamptz not null default now()
 );
 
-insert into admin_credentials (username, password_hash, role)
-values ('admin', 'shop4me2026', 'admin')
-on conflict (username) do nothing;
+-- Legacy credentials seed removed for security. Use Supabase Auth and user_roles instead.
+-- insert into admin_credentials (username, password_hash, role)
+-- values ('admin', 'shop4me2026', 'admin')
+-- on conflict (username) do nothing;
 
 alter table admin_credentials enable row level security;
 
