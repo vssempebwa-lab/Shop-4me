@@ -1,9 +1,9 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { X, MapPin, User, Phone, CheckCircle2, Truck, Loader2, WalletCards } from 'lucide-react';
+import { X, MapPin, User, Phone, CheckCircle2, Truck, Loader2, WalletCards, Download } from 'lucide-react';
 import { useCart } from '../context/CartContext';
 import { formatUGX } from '../lib/format';
 import { supabase } from '../lib/supabase';
-import type { Outlet, Order } from '../types';
+import type { Outlet, Order, OrderItem, UserRoleProfile } from '../types';
 import { DEMO_ORDER_PREFIX, updateDemoOrder } from '../lib/demoOrders';
 import { getStatusDisplay } from '../lib/orderStatus';
 import {
@@ -13,28 +13,32 @@ import {
   OFFICIAL_OUTLETS,
   suggestOutletFromText,
 } from '../lib/outlets';
+import { fetchPublicAttendantForOutlet } from '../lib/attendants';
+import { generateShopListPDF, preloadShopListPdfGenerator } from '../lib/shopListPdf';
+import { DEFAULT_PAYMENT_SETTINGS, fetchPaymentSettings, type PaymentSettings } from '../lib/paymentSettings';
+import AttendantProfileCard from './AttendantProfileCard';
 
 interface CheckoutModalProps {
   open: boolean;
   onClose: () => void;
   onOrderPlaced: (order: Order) => void;
+  initialSelectedOutletCode?: string;
+  initialOutlet?: Outlet | null;
+  initialAttendant?: UserRoleProfile | null;
+  onSelectedOutletCodeChange?: (outletCode: string) => void;
   userId?: string | null;
 }
 
-const PAYMENT_OPTIONS = [
-  {
-    label: 'MTN MoMoPay',
-    till: 'Merchant Till: 700000',
-    value: 'MTN MoMoPay - Till 700000',
-  },
-  {
-    label: 'Airtel Money Merchant',
-    till: 'Merchant Till: 700001',
-    value: 'Airtel Money Merchant - Till 700001',
-  },
-];
-
-export default function CheckoutModal({ open, onClose, onOrderPlaced, userId }: CheckoutModalProps) {
+export default function CheckoutModal({
+  open,
+  onClose,
+  onOrderPlaced,
+  initialSelectedOutletCode,
+  initialOutlet,
+  initialAttendant,
+  onSelectedOutletCodeChange,
+  userId,
+}: CheckoutModalProps) {
   const { items, subtotal, clear } = useCart();
   const DELIVERY_FEE = 5000;
   const total = subtotal + DELIVERY_FEE;
@@ -42,9 +46,15 @@ export default function CheckoutModal({ open, onClose, onOrderPlaced, userId }: 
   const [phone, setPhone] = useState('');
   const [address, setAddress] = useState('');
   const [selectedArea, setSelectedArea] = useState('');
-  const [selectedOutletCode, setSelectedOutletCode] = useState('');
+  const [selectedOutletCode, setSelectedOutletCode] = useState(initialSelectedOutletCode ?? '');
   const [outlets, setOutlets] = useState<Outlet[]>([]);
-  const [paymentMethod, setPaymentMethod] = useState('MTN MoMoPay - Till 700000');
+  const [paymentSettings, setPaymentSettings] = useState<PaymentSettings>(DEFAULT_PAYMENT_SETTINGS);
+  const [paymentMethod, setPaymentMethod] = useState(formatPaymentMethodValue('mtn', DEFAULT_PAYMENT_SETTINGS));
+  const [attendant, setAttendant] = useState<UserRoleProfile | null>(
+    initialAttendant?.assigned_outlet === initialSelectedOutletCode ? initialAttendant ?? null : null,
+  );
+  const [attendantLoading, setAttendantLoading] = useState(false);
+  const [attendantError, setAttendantError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const locationOptions = buildLocationOptions(outlets);
@@ -55,7 +65,11 @@ export default function CheckoutModal({ open, onClose, onOrderPlaced, userId }: 
     selectedLocation?.division,
     address,
   );
-  const selectedOutlet = findOutletByCode(outlets, selectedOutletCode);
+  const selectedOutlet =
+    findOutletByCode(outlets, selectedOutletCode) ??
+    (initialOutlet?.outlet_code === selectedOutletCode ? initialOutlet : null);
+  const selectedAttendant = attendant?.assigned_outlet === selectedOutletCode ? attendant : null;
+  const paymentOptions = buildCheckoutPaymentOptions(paymentSettings);
   const outletMismatch = Boolean(
     selectedLocation &&
       suggestedOutlet?.outlet_code &&
@@ -65,6 +79,10 @@ export default function CheckoutModal({ open, onClose, onOrderPlaced, userId }: 
 
   useEffect(() => {
     if (!open) return;
+
+    if (initialSelectedOutletCode) {
+      setSelectedOutletCode(initialSelectedOutletCode);
+    }
 
     const loadOutlets = async () => {
       const { data, error: outletError } = await supabase
@@ -81,17 +99,72 @@ export default function CheckoutModal({ open, onClose, onOrderPlaced, userId }: 
     };
 
     void loadOutlets();
+  }, [initialSelectedOutletCode, open]);
+
+  useEffect(() => {
+    if (!open) return;
+
+    void fetchPaymentSettings().then((nextSettings) => {
+      setPaymentSettings(nextSettings);
+      setPaymentMethod((current) => {
+        if (current.toLowerCase().includes('airtel')) return formatPaymentMethodValue('airtel', nextSettings);
+        return formatPaymentMethodValue('mtn', nextSettings);
+      });
+    });
   }, [open]);
+
+  useEffect(() => {
+    if (selectedOutletCode || !outlets[0]) return;
+    updateSelectedOutlet(outlets[0].outlet_code);
+  }, [outlets, selectedOutletCode]);
 
   useEffect(() => {
     const location = locationOptions.find((option) => option.value === selectedArea);
     if (!location) return;
 
     const matchedOutlet = findOutletByCode(outlets, location.outletCode);
-    if (matchedOutlet) setSelectedOutletCode(matchedOutlet.outlet_code);
+    if (matchedOutlet) updateSelectedOutlet(matchedOutlet.outlet_code);
   }, [outlets, selectedArea]);
 
+  useEffect(() => {
+    if (!selectedOutletCode) {
+      setAttendant(null);
+      setAttendantError(null);
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadAttendant = async () => {
+      const matchingInitialAttendant =
+        initialAttendant?.assigned_outlet === selectedOutletCode ? initialAttendant : null;
+
+      setAttendantLoading(true);
+      setAttendantError(null);
+      setAttendant(matchingInitialAttendant);
+
+      const { attendant: profile, error } = await fetchPublicAttendantForOutlet(selectedOutletCode);
+
+      if (cancelled) return;
+
+      setAttendant(profile ?? matchingInitialAttendant);
+      setAttendantError(error && !matchingInitialAttendant ? error : null);
+      setAttendantLoading(false);
+    };
+
+    void loadAttendant();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [initialAttendant, selectedOutletCode]);
+
   if (!open) return null;
+
+  function updateSelectedOutlet(outletCode: string) {
+    setSelectedOutletCode(outletCode);
+    onSelectedOutletCodeChange?.(outletCode);
+  }
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -149,7 +222,7 @@ export default function CheckoutModal({ open, onClose, onOrderPlaced, userId }: 
       setAddress('');
       setSelectedArea('');
       setSelectedOutletCode('');
-      setPaymentMethod('MTN MoMoPay - Till 700000');
+      setPaymentMethod(formatPaymentMethodValue('mtn', paymentSettings));
     };
 
     const finishOrder = (order: Order) => {
@@ -250,6 +323,20 @@ export default function CheckoutModal({ open, onClose, onOrderPlaced, userId }: 
             </div>
           </div>
 
+          {selectedOutlet && (
+            <section className="mt-4">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                Active Attendant
+              </p>
+              <AttendantProfileCard
+                attendant={selectedAttendant}
+                attendantError={attendantError}
+                loading={attendantLoading}
+                outlet={selectedOutlet}
+              />
+            </section>
+          )}
+
           {/* Contact details */}
           <p className="mt-5 text-xs font-semibold uppercase tracking-wide text-gray-500">
             Contact Details
@@ -283,7 +370,7 @@ export default function CheckoutModal({ open, onClose, onOrderPlaced, userId }: 
                 <select
                   value={selectedArea}
                   onChange={(event) => setSelectedArea(event.target.value)}
-                  className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm outline-none transition focus:border-brand-400 focus:bg-white focus:ring-2 focus:ring-brand-100"
+                  className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm outline-none transition focus:border-emerald-400 focus:bg-white focus:ring-2 focus:ring-emerald-100"
                 >
                   <option value="">Select your area</option>
                   {locationOptions.map((option) => (
@@ -294,20 +381,25 @@ export default function CheckoutModal({ open, onClose, onOrderPlaced, userId }: 
                 </select>
               </label>
               <label className="block">
-                <span className="mb-1 block text-xs font-semibold text-gray-600">Pickup Outlet</span>
+                <span className="mb-1 block text-xs font-semibold text-gray-600">Choose Your Outlet</span>
                 <select
                   value={selectedOutletCode}
-                  onChange={(event) => setSelectedOutletCode(event.target.value)}
-                  className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm outline-none transition focus:border-brand-400 focus:bg-white focus:ring-2 focus:ring-brand-100"
+                  onChange={(event) => updateSelectedOutlet(event.target.value)}
                   required
+                  className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm outline-none transition focus:border-emerald-400 focus:bg-white focus:ring-2 focus:ring-emerald-100"
                 >
-                  <option value="">Select pickup outlet</option>
+                  <option value="">Select an outlet</option>
                   {outlets.map((outlet) => (
                     <option key={outlet.outlet_code} value={outlet.outlet_code}>
                       {outlet.hub_market || outlet.name} - {outlet.division}
                     </option>
                   ))}
                 </select>
+                {selectedOutlet && (
+                  <span className="mt-1.5 block text-xs font-medium text-gray-500">
+                    Your order will be prepared at this outlet.
+                  </span>
+                )}
               </label>
               {outletMismatch && (
                 <p className="rounded-xl bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700">
@@ -354,7 +446,7 @@ export default function CheckoutModal({ open, onClose, onOrderPlaced, userId }: 
               You'll pay via Mobile Money when your order arrives at your pickup station. No upfront payment required.
             </p>
             <div className="mt-3 grid gap-2 sm:grid-cols-2">
-              {PAYMENT_OPTIONS.map((option) => (
+              {paymentOptions.map((option) => (
                 <label
                   key={option.value}
                   className={`cursor-pointer rounded-2xl border p-3 transition ${
@@ -384,19 +476,21 @@ export default function CheckoutModal({ open, onClose, onOrderPlaced, userId }: 
             </p>
           )}
 
-          <button
-            type="submit"
-            disabled={submitting || items.length === 0 || !selectedOutletCode}
-            className="mt-5 flex w-full items-center justify-center gap-2 rounded-full bg-brand-600 py-3 text-sm font-bold text-white shadow-md transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:bg-gray-300"
-          >
-            {submitting ? (
-              <>
-                <Loader2 className="h-4 w-4 animate-spin" /> Placing order...
-              </>
-            ) : (
-              <>Place Order - {formatUGX(total)}</>
-            )}
-          </button>
+          <div className="mt-5">
+            <button
+              type="submit"
+              disabled={submitting || items.length === 0 || !selectedOutletCode}
+              className="flex min-h-12 w-full items-center justify-center gap-2 rounded-full bg-brand-600 px-4 py-3 text-sm font-bold text-white shadow-md transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:bg-gray-300"
+            >
+              {submitting ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" /> Placing order...
+                </>
+              ) : (
+                <>Place Order - {formatUGX(total)}</>
+              )}
+            </button>
+          </div>
         </form>
       </div>
     </div>
@@ -458,6 +552,27 @@ function buildLocationOptions(outlets: Outlet[]) {
   );
 }
 
+function buildCheckoutPaymentOptions(settings: PaymentSettings) {
+  return [
+    {
+      label: 'MTN MoMoPay',
+      till: `Merchant Till: ${settings.mtnTillNumber}`,
+      value: formatPaymentMethodValue('mtn', settings),
+    },
+    {
+      label: settings.airtelLabel,
+      till: `Merchant Till: ${settings.airtelTillNumber}`,
+      value: formatPaymentMethodValue('airtel', settings),
+    },
+  ];
+}
+
+function formatPaymentMethodValue(provider: 'mtn' | 'airtel', settings: PaymentSettings) {
+  return provider === 'mtn'
+    ? `MTN MoMoPay - Till ${settings.mtnTillNumber}`
+    : `${settings.airtelLabel} - Till ${settings.airtelTillNumber}`;
+}
+
 export function OrderConfirmation({
   order,
   onClose,
@@ -466,12 +581,109 @@ export function OrderConfirmation({
   onClose: () => void;
 }) {
   const [currentOrder, setCurrentOrder] = useState(order);
+  const [outlets, setOutlets] = useState<Outlet[]>(OFFICIAL_OUTLETS);
+  const [attendant, setAttendant] = useState<UserRoleProfile | null>(null);
+  const [downloading, setDownloading] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
   const statusDisplay = getStatusDisplay(currentOrder.order_status ?? currentOrder.status);
   const isDemoOrder = currentOrder.id.startsWith(DEMO_ORDER_PREFIX);
+  const selectedOutlet =
+    findOutletByCode(outlets, currentOrder.outlet_code ?? '') ??
+    (currentOrder.outlet_code
+      ? {
+          outlet_code: currentOrder.outlet_code,
+          name: currentOrder.outlet_code,
+          hub_market: currentOrder.outlet_code,
+          division: currentOrder.division || 'Division to confirm',
+          distribution_areas: [],
+          is_active: true,
+        }
+      : null);
+  const attendantName = attendant?.full_name || 'Not assigned yet';
+  const attendantPhone = attendant?.phone_number?.trim() || 'Not available';
 
   useEffect(() => {
     setCurrentOrder(order);
   }, [order]);
+
+  useEffect(() => {
+    void preloadShopListPdfGenerator();
+  }, []);
+
+  useEffect(() => {
+    if (isDemoOrder) return;
+
+    let cancelled = false;
+
+    const loadSavedOrder = async () => {
+      const [{ data: orderRow, error: orderError }, { data: itemRows, error: itemError }] = await Promise.all([
+        supabase
+          .from('orders')
+          .select('*')
+          .eq('id', order.id)
+          .maybeSingle(),
+        supabase
+          .from('order_items')
+          .select('id,order_id,product_id,name,price,unit,quantity,created_at')
+          .eq('order_id', order.id)
+          .order('created_at', { ascending: true }),
+      ]);
+
+      if (cancelled) return;
+
+      if (orderError || itemError || !orderRow) {
+        console.error('Unable to refresh saved order for PDF download.', orderError ?? itemError);
+        return;
+      }
+
+      setCurrentOrder({
+        ...(orderRow as Order),
+        items: itemRows?.length ? (itemRows as OrderItem[]) : order.items,
+      });
+    };
+
+    void loadSavedOrder();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isDemoOrder, order]);
+
+  useEffect(() => {
+    const loadOutlets = async () => {
+      const { data, error: outletError } = await supabase
+        .from('outlets')
+        .select('*')
+        .eq('is_active', true)
+        .order('outlet_code');
+
+      setOutlets(!outletError && data?.length ? (data as Outlet[]) : OFFICIAL_OUTLETS);
+    };
+
+    void loadOutlets();
+  }, []);
+
+  useEffect(() => {
+    if (!currentOrder.outlet_code) {
+      setAttendant(null);
+      return;
+    }
+
+    const outletCode = currentOrder.outlet_code;
+    let cancelled = false;
+
+    const loadAttendant = async () => {
+      const { attendant: profile } = await fetchPublicAttendantForOutlet(outletCode);
+
+      if (!cancelled) setAttendant(profile);
+    };
+
+    void loadAttendant();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentOrder.outlet_code]);
 
   useEffect(() => {
     if (isDemoOrder) return;
@@ -501,10 +713,53 @@ export function OrderConfirmation({
     };
   }, [isDemoOrder, order.id]);
 
+  useEffect(() => {
+    if (!toast) return;
+    const timer = window.setTimeout(() => setToast(null), 2800);
+    return () => window.clearTimeout(timer);
+  }, [toast]);
+
+  const handleDownloadShopList = async () => {
+    setDownloading(true);
+    try {
+      await generateShopListPDF({
+        orderId: currentOrder.id,
+        generatedAt: currentOrder.created_at,
+        contactName: currentOrder.contact_name,
+        contactPhone: currentOrder.phone,
+        pickupLocation: currentOrder.market_location || currentOrder.delivery_address,
+        outlet: selectedOutlet,
+        attendant,
+        items: currentOrder.items.map((item) => ({
+          name: item.name,
+          quantity: item.quantity,
+          unit: item.unit,
+          price: item.price,
+        })),
+        subtotal: currentOrder.subtotal,
+        deliveryFee: currentOrder.delivery_fee ?? 0,
+        totalAmount:
+          currentOrder.total_amount ?? (currentOrder.subtotal ?? 0) + (currentOrder.delivery_fee ?? 0),
+        paymentMethod: currentOrder.payment_method,
+      });
+      setToast('Your shop list has been downloaded');
+    } catch (downloadError) {
+      console.error('Shop list PDF download failed', downloadError);
+      setToast('Unable to download the shop list right now');
+    } finally {
+      setDownloading(false);
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
       <div className="relative w-full max-w-md overflow-hidden rounded-3xl bg-white shadow-2xl animate-scale-in">
+        {toast && (
+          <div className="absolute right-5 top-5 z-10 rounded-xl bg-gray-900 px-4 py-2 text-xs font-semibold text-white shadow-lg">
+            {toast}
+          </div>
+        )}
         <div className="bg-gradient-to-br from-brand-600 to-brand-800 px-6 py-8 text-center text-white">
           <div className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-white/20 ring-4 ring-white/30">
             <CheckCircle2 className="h-9 w-9 text-brand-200" />
@@ -538,6 +793,9 @@ export function OrderConfirmation({
             <Row label="Contact" value={currentOrder.contact_name} />
             <Row label="Phone" value={currentOrder.phone} />
             <Row label="Delivery to" value={currentOrder.delivery_address} />
+            <Row label="Outlet" value={selectedOutlet ? selectedOutlet.hub_market || selectedOutlet.name : currentOrder.outlet_code || 'To confirm'} />
+            <Row label="Attendant" value={attendantName} />
+            <Row label="Attendant Phone" value={attendantPhone} />
             <Row label="Payment" value={currentOrder.payment_method || 'Pay on Delivery'} />
             <Row label="Items" value={`${currentOrder.items.length} item(s)`} />
             <div className="flex items-center justify-between border-t border-gray-100 pt-2">
@@ -555,9 +813,18 @@ export function OrderConfirmation({
               </span>
             </div>
           </div>
+
+          <button
+            onClick={handleDownloadShopList}
+            disabled={downloading}
+            className="mt-5 flex w-full items-center justify-center gap-2 rounded-full border border-brand-200 bg-white py-3 text-sm font-bold text-brand-700 transition hover:bg-brand-50 disabled:cursor-not-allowed disabled:border-gray-200 disabled:text-gray-400"
+          >
+            {downloading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+            Download Your Shop List
+          </button>
           <button
             onClick={onClose}
-            className="mt-5 w-full rounded-full bg-brand-600 py-3 text-sm font-bold text-white transition hover:bg-brand-700"
+            className="mt-3 w-full rounded-full bg-brand-600 py-3 text-sm font-bold text-white transition hover:bg-brand-700"
           >
             Continue Shopping
           </button>

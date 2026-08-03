@@ -90,6 +90,7 @@ export interface UserRoleProfile {
   user_id: string;
   email?: string | null;
   full_name?: string | null;
+  phone_number?: string | null;
   avatar_url?: string | null;
   role: 'admin' | 'attendant' | 'merchant' | 'customer';
   assigned_outlet?: string | null;

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import Header, { MerchantToggle } from './components/Header';
 import Footer from './components/Footer';
 import CategoryBar from './components/CategoryBar';
@@ -17,7 +17,7 @@ import {
 } from './lib/siteSettings';
 import { useAuth } from './hooks/useAuth';
 import { getLatestLocalAttendant } from './lib/localAdminUsers';
-import type { Category, Order, Product } from './types';
+import type { Category, Order, Outlet, Product, UserRoleProfile } from './types';
 
 function App() {
   const [products, setProducts] = useState<Product[]>([]);
@@ -26,6 +26,12 @@ function App() {
   const [activeCategory, setActiveCategory] = useState<Category | 'All'>('All');
   const [cartOpen, setCartOpen] = useState(false);
   const [checkoutOpen, setCheckoutOpen] = useState(false);
+  const [selectedOutletCode, setSelectedOutletCode] = useState(() => {
+    if (typeof window === 'undefined') return 'DEPOT-KAW-01';
+    return window.localStorage.getItem('sfm-selected-outlet-code') || 'DEPOT-KAW-01';
+  });
+  const [selectedOutletContext, setSelectedOutletContext] = useState<Outlet | null>(null);
+  const [selectedAttendantContext, setSelectedAttendantContext] = useState<UserRoleProfile | null>(null);
   const [placedOrder, setPlacedOrder] = useState<Order | null>(null);
   const [merchantMode, setMerchantMode] = useState(false);
   const [attendantMode, setAttendantMode] = useState(false);
@@ -147,6 +153,18 @@ function App() {
   useEffect(() => {
     void fetchSiteSettings().then(setSiteSettings);
   }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem('sfm-selected-outlet-code', selectedOutletCode);
+  }, [selectedOutletCode]);
+
+  const handleOutletContextChange = useCallback(
+    (outlet: Outlet | null, attendant: UserRoleProfile | null) => {
+      setSelectedOutletContext(outlet);
+      setSelectedAttendantContext(attendant);
+    },
+    [],
+  );
 
   const counts = useMemo(() => {
     const c: Record<string, number> = { All: products.length };
@@ -310,6 +328,9 @@ function App() {
             setCartOpen(false);
             setCheckoutOpen(true);
           }}
+          selectedOutletCode={selectedOutletCode}
+          onSelectedOutletCodeChange={setSelectedOutletCode}
+          onOutletContextChange={handleOutletContextChange}
           user={user}
           siteSettings={siteSettings}
         />
@@ -320,6 +341,10 @@ function App() {
             setCheckoutOpen(false);
             setPlacedOrder(o);
           }}
+          initialSelectedOutletCode={selectedOutletCode}
+          initialOutlet={selectedOutletContext}
+          initialAttendant={selectedAttendantContext}
+          onSelectedOutletCodeChange={setSelectedOutletCode}
           userId={user?.id}
         />
         {placedOrder && (

@@ -32,6 +32,7 @@ import {
   ImagePlus,
   Upload,
   Link,
+  CreditCard,
 } from 'lucide-react';
 import type { User as SupabaseUser } from '@supabase/supabase-js';
 import type {
@@ -84,6 +85,15 @@ import {
   type SiteSettings,
   type TrustBadgeContent,
 } from '../lib/siteSettings';
+import {
+  DEFAULT_PAYMENT_SETTINGS,
+  fetchPaymentSettings,
+  normalizePaymentSettings,
+  sanitizeMerchantNumber,
+  savePaymentSettings,
+  validatePaymentSettings,
+  type PaymentSettings,
+} from '../lib/paymentSettings';
 
 interface MerchantDashboardProps {
   products: Product[];
@@ -103,6 +113,7 @@ type Tab =
   | 'accounts'
   | 'audit'
   | 'reports'
+  | 'payments'
   | 'settings'
   | 'products';
 
@@ -721,6 +732,11 @@ export default function MerchantDashboard({
             <BarChart3 className="h-4 w-4" /> Reports
           </TabButton>
         )}
+        {isAdmin && (
+          <TabButton active={tab === 'payments'} onClick={() => setTab('payments')}>
+            <CreditCard className="h-4 w-4" /> Payments
+          </TabButton>
+        )}
         {canManageSiteSettings && (
           <TabButton active={tab === 'settings'} onClick={() => setTab('settings')}>
             <Palette className="h-4 w-4" /> Site Settings
@@ -786,6 +802,13 @@ export default function MerchantDashboard({
         />
       ) : tab === 'reports' ? (
         <ReportsTab orders={orders} outlets={outlets} loading={loadingOrders || loadingAdminData} />
+      ) : tab === 'payments' ? (
+        <PaymentSettingsTab
+          user={user}
+          profile={profile}
+          onToast={showToast}
+          onAuditLogged={loadAdminData}
+        />
       ) : tab === 'settings' ? (
         <SiteSettingsTab
           settings={siteSettings}
@@ -1120,6 +1143,7 @@ function AccountManagementTab({
 }) {
   const [email, setEmail] = useState('');
   const [fullName, setFullName] = useState('');
+  const [phoneNumber, setPhoneNumber] = useState('');
   const [password, setPassword] = useState('');
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [avatarPreviewUrl, setAvatarPreviewUrl] = useState('');
@@ -1128,16 +1152,19 @@ function AccountManagementTab({
   const [editingUser, setEditingUser] = useState<UserRoleProfile | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [phoneError, setPhoneError] = useState('');
   const selectedAssignedOutlet = findOutletByCode(outlets, assignedOutlet);
 
   const resetForm = () => {
     if (avatarPreviewUrl.startsWith('blob:')) URL.revokeObjectURL(avatarPreviewUrl);
     setEmail('');
     setFullName('');
+    setPhoneNumber('');
     setPassword('');
     setAssignedOutlet('');
     setAvatarFile(null);
     setAvatarPreviewUrl('');
+    setPhoneError('');
   };
 
   const callAccountAction = async (body: Record<string, unknown>, successMessage: string) => {
@@ -1190,6 +1217,14 @@ function AccountManagementTab({
       return false;
     }
 
+    const phoneError = validateUgandaPhoneNumber(phoneNumber);
+    if (phoneError) {
+      setError(phoneError);
+      setPhoneError(phoneError);
+      return false;
+    }
+    setPhoneError('');
+
     if (role === 'attendant' && !assignedOutlet) {
       setError('Select an assigned outlet for this attendant.');
       return false;
@@ -1200,6 +1235,7 @@ function AccountManagementTab({
       user_id: crypto.randomUUID(),
       email: email.trim().toLowerCase(),
       full_name: fullName.trim() || null,
+      phone_number: normalizeUgandaPhoneNumber(phoneNumber),
       avatar_url: avatarUrl,
       role,
       assigned_outlet: role === 'attendant' ? assignedOutlet : null,
@@ -1221,6 +1257,15 @@ function AccountManagementTab({
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     setError('');
+
+    const phoneError = validateUgandaPhoneNumber(phoneNumber);
+    if (phoneError) {
+      setError(phoneError);
+      setPhoneError(phoneError);
+      return;
+    }
+    setPhoneError('');
+
     setSaving(true);
 
     const { data: sessionData } = await supabase.auth.getSession();
@@ -1237,6 +1282,7 @@ function AccountManagementTab({
       body: JSON.stringify({
         email,
         fullName,
+        phoneNumber: normalizeUgandaPhoneNumber(phoneNumber),
         password,
         role,
         assignedOutlet,
@@ -1320,6 +1366,17 @@ function AccountManagementTab({
             />
             <FormField label="Email" value={email} onChange={setEmail} placeholder="attendant@shopforme.ug" />
             <FormField label="Full Name" value={fullName} onChange={setFullName} placeholder="Jane Admin" />
+            <FormField
+              label="Phone Number"
+              value={phoneNumber}
+              onChange={(value) => {
+                setPhoneNumber(value);
+                if (phoneError) setPhoneError(validateUgandaPhoneNumber(value));
+              }}
+              placeholder="e.g., 0772 123 456"
+              type="tel"
+              error={phoneError}
+            />
             <FormField label="Temporary Password" value={password} onChange={setPassword} type="password" placeholder="Minimum 8 characters" />
             <label className="block">
               <span className="mb-1 block text-xs font-semibold text-gray-600">Role</span>
@@ -1378,6 +1435,7 @@ function AccountManagementTab({
             <thead className="bg-gray-50 text-xs uppercase tracking-wide text-gray-500">
               <tr>
                 <th className="px-4 py-3">User</th>
+                <th className="px-4 py-3">Phone</th>
                 <th className="px-4 py-3">Role</th>
                 <th className="px-4 py-3">Outlet</th>
                 <th className="px-4 py-3">Status</th>
@@ -1397,6 +1455,7 @@ function AccountManagementTab({
                       </div>
                     </div>
                   </td>
+                  <td className="px-4 py-3 text-gray-600">{adminUser.phone_number || '-'}</td>
                   <td className="px-4 py-3 capitalize">{adminUser.role}</td>
                   <td className="px-4 py-3">
                     {adminUser.assigned_outlet
@@ -1479,6 +1538,7 @@ function EditAccountModal({
   onToast: (toast: { tone: 'success' | 'error'; message: string }) => void;
 }) {
   const [fullName, setFullName] = useState(user.full_name ?? '');
+  const [phoneNumber, setPhoneNumber] = useState(user.phone_number ?? '');
   const [role, setRole] = useState<'admin' | 'attendant'>(
     user.role === 'attendant' ? 'attendant' : 'admin',
   );
@@ -1487,6 +1547,7 @@ function EditAccountModal({
   const [avatarPreviewUrl, setAvatarPreviewUrl] = useState(user.avatar_url ?? '');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [phoneError, setPhoneError] = useState('');
   const selectedAssignedOutlet = findOutletByCode(outlets, assignedOutlet);
   const isLocalFreeUser = user.invited_by === 'local-free-access';
 
@@ -1498,6 +1559,14 @@ function EditAccountModal({
       setError('Full name is required.');
       return;
     }
+
+    const phoneError = validateUgandaPhoneNumber(phoneNumber);
+    if (phoneError) {
+      setError(phoneError);
+      setPhoneError(phoneError);
+      return;
+    }
+    setPhoneError('');
 
     if (role === 'attendant' && !assignedOutlet) {
       setError('Select an assigned outlet for this attendant.');
@@ -1525,6 +1594,7 @@ function EditAccountModal({
 
       const patch: Partial<UserRoleProfile> = {
         full_name: fullName.trim(),
+        phone_number: normalizeUgandaPhoneNumber(phoneNumber),
         role,
         assigned_outlet: role === 'attendant' ? assignedOutlet : null,
       };
@@ -1556,6 +1626,7 @@ function EditAccountModal({
           action: 'update_account',
           userId: user.user_id,
           fullName: fullName.trim(),
+          phoneNumber: normalizeUgandaPhoneNumber(phoneNumber),
           role,
           assignedOutlet: role === 'attendant' ? assignedOutlet : null,
           avatarUrl,
@@ -1620,6 +1691,17 @@ function EditAccountModal({
             </span>
           </label>
           <FormField label="Full Name" value={fullName} onChange={setFullName} placeholder="Jane Admin" />
+          <FormField
+            label="Phone Number"
+            value={phoneNumber}
+            onChange={(value) => {
+              setPhoneNumber(value);
+              if (phoneError) setPhoneError(validateUgandaPhoneNumber(value));
+            }}
+            placeholder="e.g., 0772 123 456"
+            type="tel"
+            error={phoneError}
+          />
           <label className="block">
             <span className="mb-1 block text-xs font-semibold text-gray-600">Role</span>
             <select
@@ -2329,6 +2411,144 @@ function TabButton({
   );
 }
 
+function PaymentSettingsTab({
+  user,
+  profile,
+  onToast,
+  onAuditLogged,
+}: {
+  user: SupabaseUser | null;
+  profile: UserRoleProfile | null;
+  onToast: (toast: { tone: 'success' | 'error'; message: string }) => void;
+  onAuditLogged: () => void;
+}) {
+  const [paymentDraft, setPaymentDraft] = useState<PaymentSettings>(DEFAULT_PAYMENT_SETTINGS);
+  const [publishedPaymentSettings, setPublishedPaymentSettings] = useState<PaymentSettings>(DEFAULT_PAYMENT_SETTINGS);
+  const [saving, setSaving] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [paymentError, setPaymentError] = useState<string | null>(null);
+  const actorName = profile?.full_name || profile?.email || user?.email || 'Admin';
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadPaymentSettings = async () => {
+      setLoading(true);
+      const nextSettings = await fetchPaymentSettings({ fresh: true });
+      if (cancelled) return;
+      setPaymentDraft(nextSettings);
+      setPublishedPaymentSettings(nextSettings);
+      setLoading(false);
+    };
+
+    void loadPaymentSettings();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const updatePaymentDraft = <K extends keyof PaymentSettings>(key: K, value: PaymentSettings[K]) => {
+    setPaymentDraft((current) => normalizePaymentSettings({ ...current, [key]: value }));
+    setPaymentError(null);
+  };
+
+  const savePayments = async () => {
+    const normalized = normalizePaymentSettings(paymentDraft);
+    const validationError = validatePaymentSettings(normalized);
+    if (validationError) {
+      setPaymentError(validationError);
+      return;
+    }
+
+    setSaving(true);
+    setPaymentError(null);
+
+    const changes = buildPaymentSettingsChanges(publishedPaymentSettings, normalized);
+
+    try {
+      const saved = await savePaymentSettings(normalized, user?.id ?? null);
+      await supabase.from('admin_audit_logs').insert({
+        actor_user_id: user?.id ?? null,
+        action: 'payment_settings_updated',
+        target_type: 'payment_settings',
+        target_id: 'default',
+        metadata: { changes, updated_by_name: actorName },
+      });
+
+      setPaymentDraft(saved);
+      setPublishedPaymentSettings(saved);
+      onAuditLogged();
+      onToast({ tone: 'success', message: 'Payment settings saved.' });
+    } catch (saveError) {
+      const message = saveError instanceof Error ? saveError.message : 'Could not save payment settings.';
+      setPaymentError(message);
+      onToast({ tone: 'error', message });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="mt-4 space-y-4">
+      <div className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-base font-extrabold text-gray-900">Merchant Payment Settings</h2>
+            <p className="text-sm text-gray-500">
+              Manage the merchant codes shown in checkout and printable shop list PDFs.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={savePayments}
+            disabled={saving || loading}
+            className="inline-flex items-center gap-2 rounded-full bg-brand-600 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-brand-700 disabled:bg-gray-300"
+          >
+            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+            Save Changes
+          </button>
+        </div>
+        {paymentError && (
+          <p className="mt-3 rounded-xl bg-red-50 px-3 py-2 text-xs font-semibold text-red-600">
+            {paymentError}
+          </p>
+        )}
+      </div>
+
+      <SettingsSection
+        title="Payment Details"
+        note={
+          loading
+            ? 'Loading payment settings...'
+            : paymentDraft.updatedAt
+              ? `Last updated: ${new Date(paymentDraft.updatedAt).toLocaleString()}`
+              : 'Used by checkout and printable PDFs.'
+        }
+        onReset={() => {
+          setPaymentDraft(DEFAULT_PAYMENT_SETTINGS);
+          setPaymentError(null);
+        }}
+      >
+        <div className="grid gap-4 xl:grid-cols-2">
+          <PaymentProviderSettingsCard
+            provider="mtn"
+            title="MTN MoMoPay"
+            settings={paymentDraft}
+            onChange={updatePaymentDraft}
+          />
+          <PaymentProviderSettingsCard
+            provider="airtel"
+            title="Airtel Money Merchant"
+            settings={paymentDraft}
+            onChange={updatePaymentDraft}
+          />
+        </div>
+      </SettingsSection>
+    </div>
+  );
+}
+
 function SiteSettingsTab({
   settings,
   user,
@@ -2902,6 +3122,147 @@ function SettingsTabButton({
   );
 }
 
+function PaymentProviderSettingsCard({
+  provider,
+  title,
+  settings,
+  onChange,
+}: {
+  provider: 'mtn' | 'airtel';
+  title: string;
+  settings: PaymentSettings;
+  onChange: <K extends keyof PaymentSettings>(key: K, value: PaymentSettings[K]) => void;
+}) {
+  const isMtn = provider === 'mtn';
+  const tillNumber = isMtn ? settings.mtnTillNumber : settings.airtelTillNumber;
+  const label = isMtn ? settings.mtnLabel : settings.airtelLabel;
+  const invalidTill = tillNumber.length > 0 && !/^\d{6}$/.test(tillNumber);
+
+  return (
+    <div className="rounded-2xl border border-gray-100 bg-gray-50 p-4">
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <div>
+          <p className="text-sm font-extrabold text-gray-900">{title}</p>
+          <p className="text-xs text-gray-500">Shown in checkout and printable shop lists.</p>
+        </div>
+        <span
+          className={`rounded-full px-2.5 py-1 text-[11px] font-extrabold uppercase tracking-wide ${
+            isMtn ? 'bg-yellow-100 text-yellow-900' : 'bg-red-50 text-red-700'
+          }`}
+        >
+          {isMtn ? 'MTN' : 'Airtel'}
+        </span>
+      </div>
+
+      <div className="grid gap-3">
+        <label className="block">
+          <span className="mb-1 flex items-center justify-between gap-2 text-xs font-semibold text-gray-600">
+            Merchant/Till Number
+            <span className={invalidTill ? 'font-bold text-red-500' : 'font-medium text-gray-400'}>
+              {tillNumber.length}/6
+            </span>
+          </span>
+          <input
+            inputMode="numeric"
+            value={tillNumber}
+            maxLength={6}
+            onChange={(event) =>
+              onChange(isMtn ? 'mtnTillNumber' : 'airtelTillNumber', sanitizeMerchantNumber(event.target.value))
+            }
+            className={`w-full rounded-xl border bg-white px-3 py-2.5 text-sm font-semibold outline-none transition focus:bg-white focus:ring-2 ${
+              invalidTill
+                ? 'border-red-200 text-red-700 focus:border-red-400 focus:ring-red-100'
+                : 'border-gray-200 text-gray-800 focus:border-brand-400 focus:ring-brand-100'
+            }`}
+          />
+        </label>
+
+        {isMtn && (
+          <TextField
+            label="Dial Code"
+            value={settings.mtnDialCode}
+            maxLength={20}
+            onChange={(value) => onChange('mtnDialCode', value)}
+          />
+        )}
+
+        <TextField
+          label="Display Label"
+          value={label}
+          maxLength={40}
+          onChange={(value) => onChange(isMtn ? 'mtnLabel' : 'airtelLabel', value)}
+        />
+      </div>
+
+      <div className="mt-4">
+        <p className="mb-2 text-xs font-extrabold uppercase tracking-wide text-gray-500">PDF Preview</p>
+        <PaymentSettingsPreview provider={provider} settings={settings} />
+      </div>
+    </div>
+  );
+}
+
+function PaymentSettingsPreview({
+  provider,
+  settings,
+}: {
+  provider: 'mtn' | 'airtel';
+  settings: PaymentSettings;
+}) {
+  const isMtn = provider === 'mtn';
+  const digits = (isMtn ? settings.mtnTillNumber : settings.airtelTillNumber).padEnd(6, ' ').slice(0, 6).split('');
+  const label = isMtn ? settings.mtnLabel : settings.airtelLabel;
+
+  return (
+    <div
+      className={`min-h-[142px] rounded-2xl border p-4 ${
+        isMtn
+          ? 'border-[#00205B] bg-[#FFCC00] text-[#00205B]'
+          : 'border-[#ED1C24] bg-white text-[#ED1C24]'
+      }`}
+    >
+      {isMtn ? (
+        <>
+          <div className="flex items-center gap-2">
+            <span className="rounded-full bg-[#00205B] px-3 py-1 text-xs font-extrabold text-[#FFCC00]">MTN</span>
+            <span className="text-sm font-extrabold">{label}</span>
+          </div>
+          <p className="mt-4 text-lg font-extrabold">Pay with MoMoPay</p>
+          <p className="mt-1 text-sm font-semibold">Dial {settings.mtnDialCode}</p>
+        </>
+      ) : (
+        <>
+          <div className="flex items-center gap-3">
+            <div className="leading-none">
+              <p className="text-xl font-black lowercase">airtel</p>
+              <p className="text-xs font-extrabold">money</p>
+            </div>
+            <div className="h-9 w-px bg-[#ED1C24]" />
+            <p className="text-base font-black lowercase">{label.replace(/airtel money/i, '').trim() || 'merchant'}</p>
+          </div>
+        </>
+      )}
+      <p className="mt-4 text-[11px] font-black uppercase tracking-wide">
+        {isMtn ? 'Merchant Code' : 'Merchant Till'}
+      </p>
+      <div className="mt-2 flex gap-1.5">
+        {digits.map((digit, index) => (
+          <span
+            key={`${provider}-${index}`}
+            className={`grid h-8 w-7 place-items-center rounded-lg border text-sm font-black ${
+              isMtn
+                ? 'border-[#00205B] bg-yellow-200 text-[#00205B]'
+                : 'border-[#ED1C24] bg-red-50 text-[#ED1C24]'
+            }`}
+          >
+            {digit.trim() || '-'}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function SelectField({
   label,
   value,
@@ -3203,6 +3564,27 @@ function formatSectionUpdated(records: SiteSettingRecord[], keys: Array<keyof Si
   return `Last updated by ${newest.updated_by_name || 'Admin'} on ${new Date(
     newest.updated_at || '',
   ).toLocaleString()}.`;
+}
+
+function buildPaymentSettingsChanges(previous: PaymentSettings, next: PaymentSettings) {
+  const fields: Array<{ key: keyof PaymentSettings; provider: 'mtn' | 'airtel'; label: string }> = [
+    { key: 'mtnTillNumber', provider: 'mtn', label: 'Merchant/Till Number' },
+    { key: 'mtnDialCode', provider: 'mtn', label: 'Dial Code' },
+    { key: 'mtnLabel', provider: 'mtn', label: 'Display Label' },
+    { key: 'airtelTillNumber', provider: 'airtel', label: 'Merchant/Till Number' },
+    { key: 'airtelLabel', provider: 'airtel', label: 'Display Label' },
+  ];
+
+  return fields
+    .filter(({ key }) => previous[key] !== next[key])
+    .map(({ key, provider, label }) => ({
+      provider,
+      field: key,
+      label,
+      old_value: previous[key],
+      new_value: next[key],
+      changed_at: new Date().toISOString(),
+    }));
 }
 
 function OrdersTab({
@@ -3526,12 +3908,14 @@ function FormField({
   onChange,
   placeholder,
   type = 'text',
+  error,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
   placeholder?: string;
   type?: string;
+  error?: string;
 }) {
   return (
     <label className="block">
@@ -3541,8 +3925,28 @@ function FormField({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm outline-none transition focus:border-brand-400 focus:bg-white focus:ring-2 focus:ring-brand-100"
+        className={`w-full rounded-xl border bg-gray-50 px-3 py-2.5 text-sm outline-none transition focus:bg-white focus:ring-2 ${
+          error
+            ? 'border-red-200 text-red-700 focus:border-red-400 focus:ring-red-100'
+            : 'border-gray-200 focus:border-brand-400 focus:ring-brand-100'
+        }`}
       />
+      {error && <span className="mt-1 block text-xs font-semibold text-red-600">{error}</span>}
     </label>
   );
 }
+
+function validateUgandaPhoneNumber(value: string) {
+  const normalized = normalizeUgandaPhoneNumber(value);
+  if (!normalized) return 'Phone number is required.';
+  if (!UGANDA_PHONE_PATTERN.test(normalized)) {
+    return 'Enter a valid Uganda phone number, e.g. 0772 123 456 or +256 772 123 456.';
+  }
+  return '';
+}
+
+function normalizeUgandaPhoneNumber(value: string) {
+  return value.replace(/[\s()-]/g, '').trim();
+}
+
+const UGANDA_PHONE_PATTERN = /^(\+256(7\d{8}|20\d{7}|39\d{7})|0(7\d{8}|20\d{7}|39\d{7}))$/;

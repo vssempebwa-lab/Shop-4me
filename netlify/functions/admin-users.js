@@ -11,6 +11,7 @@ const officialOutletCodes = new Set([
   'DEPOT-MAK-04',
   'DEPOT-RUB-05',
 ]);
+const ugandaPhonePattern = /^(\+256(7\d{8}|20\d{7}|39\d{7})|0(7\d{8}|20\d{7}|39\d{7}))$/;
 
 function json(statusCode, body) {
   return {
@@ -23,6 +24,19 @@ function json(statusCode, body) {
 function getBearerToken(event) {
   const header = event.headers.authorization || event.headers.Authorization || '';
   return header.startsWith('Bearer ') ? header.slice('Bearer '.length) : '';
+}
+
+function normalizeUgandaPhoneNumber(value) {
+  return String(value || '').replace(/[\s()-]/g, '').trim();
+}
+
+function validateUgandaPhoneNumber(value) {
+  const normalized = normalizeUgandaPhoneNumber(value);
+  if (!normalized) return { message: 'Phone number is required.' };
+  if (!ugandaPhonePattern.test(normalized)) {
+    return { message: 'Enter a valid Uganda phone number, e.g. 0772 123 456 or +256 772 123 456.' };
+  }
+  return { phoneNumber: normalized };
 }
 
 async function requireAdmin(event, supabaseAdmin) {
@@ -62,6 +76,7 @@ async function createAccount(event, supabaseAdmin, actorId) {
   const email = String(body.email || '').trim().toLowerCase();
   const password = String(body.password || '').trim();
   const fullName = String(body.fullName || '').trim();
+  const phoneValidation = validateUgandaPhoneNumber(body.phoneNumber);
   const avatarUrl = String(body.avatarUrl || '').trim() || null;
   const role = body.role === 'attendant' ? 'attendant' : 'admin';
   const assignedOutlet = role === 'attendant' ? String(body.assignedOutlet || '').trim() : null;
@@ -72,6 +87,10 @@ async function createAccount(event, supabaseAdmin, actorId) {
 
   if (!password || password.length < 8) {
     return json(400, { message: 'Password must be at least 8 characters.' });
+  }
+
+  if (phoneValidation.message) {
+    return json(400, { message: phoneValidation.message });
   }
 
   if (role === 'attendant' && !assignedOutlet) {
@@ -95,7 +114,7 @@ async function createAccount(event, supabaseAdmin, actorId) {
     email,
     password,
     email_confirm: true,
-    user_metadata: { full_name: fullName },
+    user_metadata: { full_name: fullName, phone_number: phoneValidation.phoneNumber },
   });
 
   if (createError || !userData?.user) {
@@ -107,6 +126,7 @@ async function createAccount(event, supabaseAdmin, actorId) {
       user_id: userData.user.id,
       email,
       full_name: fullName || null,
+      phone_number: phoneValidation.phoneNumber,
       avatar_url: avatarUrl,
       role,
       assigned_outlet: assignedOutlet,
@@ -128,7 +148,7 @@ async function createAccount(event, supabaseAdmin, actorId) {
     action: 'account_created',
     target_type: 'user_role',
     target_id: userData.user.id,
-    metadata: { email, role, assigned_outlet: assignedOutlet },
+    metadata: { email, role, assigned_outlet: assignedOutlet, phone_number: phoneValidation.phoneNumber },
   });
 
   return json(201, { userId: userData.user.id, email, role, assignedOutlet });
@@ -215,12 +235,16 @@ async function updateAccount(event, supabaseAdmin, actorId) {
   const body = JSON.parse(event.body || '{}');
   const userId = String(body.userId || '').trim();
   const fullName = String(body.fullName || '').trim();
+  const phoneValidation = validateUgandaPhoneNumber(body.phoneNumber);
   const avatarUrl = body.avatarUrl === null ? null : String(body.avatarUrl || '').trim() || undefined;
   const role = body.role === 'attendant' ? 'attendant' : 'admin';
   const assignedOutlet = role === 'attendant' ? String(body.assignedOutlet || '').trim() : null;
 
   if (!userId) return json(400, { message: 'Missing userId.' });
   if (!fullName) return json(400, { message: 'Full name is required.' });
+  if (phoneValidation.message) {
+    return json(400, { message: phoneValidation.message });
+  }
   if (role === 'attendant' && !assignedOutlet) {
     return json(400, { message: 'Assign an outlet for attendant accounts.' });
   }
@@ -240,6 +264,7 @@ async function updateAccount(event, supabaseAdmin, actorId) {
 
   const updatePayload = {
     full_name: fullName,
+    phone_number: phoneValidation.phoneNumber,
     role,
     assigned_outlet: assignedOutlet,
     updated_at: new Date().toISOString(),
@@ -253,14 +278,14 @@ async function updateAccount(event, supabaseAdmin, actorId) {
     .from('user_roles')
     .update(updatePayload)
     .eq('user_id', userId)
-    .select('id,user_id,email,full_name,avatar_url,role,assigned_outlet,is_approved,is_active,invited_by,last_login_at,created_at,deactivated_at')
+    .select('id,user_id,email,full_name,phone_number,avatar_url,role,assigned_outlet,is_approved,is_active,invited_by,last_login_at,created_at,deactivated_at')
     .maybeSingle();
 
   if (error) return json(400, { message: error.message || 'Could not update account.' });
   if (!updated) return json(404, { message: 'Account not found.' });
 
   await supabaseAdmin.auth.admin.updateUserById(userId, {
-    user_metadata: { full_name: fullName },
+    user_metadata: { full_name: fullName, phone_number: phoneValidation.phoneNumber },
   });
 
   await supabaseAdmin.from('admin_audit_logs').insert({
@@ -270,6 +295,7 @@ async function updateAccount(event, supabaseAdmin, actorId) {
     target_id: userId,
     metadata: {
       full_name: fullName,
+      phone_number: phoneValidation.phoneNumber,
       role,
       assigned_outlet: assignedOutlet,
       avatar_updated: avatarUrl !== undefined,
@@ -293,7 +319,7 @@ export async function handler(event) {
   if (event.httpMethod === 'GET') {
     const { data, error } = await supabaseAdmin
       .from('user_roles')
-      .select('id,user_id,email,full_name,avatar_url,role,assigned_outlet,is_approved,is_active,invited_by,last_login_at,created_at,deactivated_at')
+      .select('id,user_id,email,full_name,phone_number,avatar_url,role,assigned_outlet,is_approved,is_active,invited_by,last_login_at,created_at,deactivated_at')
       .in('role', ['admin', 'attendant', 'merchant'])
       .order('created_at', { ascending: false });
 
