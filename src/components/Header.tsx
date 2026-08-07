@@ -176,7 +176,7 @@ export default function Header({
                     <div className="px-3 py-2">
                       <p className="text-sm font-semibold text-gray-800">Account</p>
                       <p className="text-xs text-gray-500">
-                        Sign in with Google or email/password to place orders and access merchant tools if authorized.
+                        Sign in with Google or email/password to place and track orders.
                       </p>
                     </div>
                     <div className="my-2 h-px bg-gray-100" />

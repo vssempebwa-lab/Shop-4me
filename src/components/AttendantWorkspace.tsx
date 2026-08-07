@@ -346,10 +346,10 @@ export default function AttendantWorkspace({
               <button
                 type="button"
                 onClick={() => void onLogout()}
-                className="inline-flex shrink-0 items-center gap-1 rounded-full border border-gray-200 px-2.5 py-1.5 text-[11px] font-bold text-gray-600 transition hover:border-red-200 hover:bg-red-50 hover:text-red-600"
+                className="inline-flex shrink-0 items-center gap-2 rounded-full border border-red-100 bg-red-50 px-3 py-2 text-xs font-extrabold text-red-600 transition hover:border-red-200 hover:bg-red-100 focus:outline-none focus:ring-2 focus:ring-red-200 focus:ring-offset-2"
               >
-                <LogOut className="h-3.5 w-3.5" />
-                Switch
+                <LogOut className="h-4 w-4" />
+                Logout
               </button>
             </div>
           </div>

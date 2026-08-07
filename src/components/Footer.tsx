@@ -1,21 +1,12 @@
-import { Briefcase, Phone, Mail, MapPin, Truck, ShieldCheck, Clock } from 'lucide-react';
-import { MerchantToggle } from './Header';
+import { Phone, Mail, MapPin, Truck, ShieldCheck, Clock } from 'lucide-react';
 import type { SiteSettings } from '../lib/siteSettings';
 import shopForMeLogo from '../../Admin-Pics/shop for me logo free.png';
 
 interface FooterProps {
-  merchantMode: boolean;
-  merchantRole: boolean;
-  onToggleMerchant: () => void;
-  onMerchantSignIn: () => void;
   siteSettings: SiteSettings;
 }
 
 export default function Footer({
-  merchantMode,
-  merchantRole,
-  onToggleMerchant,
-  onMerchantSignIn,
   siteSettings,
 }: FooterProps) {
   const trustIcons = {
@@ -42,7 +33,7 @@ export default function Footer({
       </div>
 
       <div className="mx-auto max-w-7xl px-4 py-10">
-        <div className="grid grid-cols-1 gap-8 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid grid-cols-1 gap-8 sm:grid-cols-3">
           {/* Brand */}
           <div>
             <div className="inline-flex items-center rounded-2xl bg-brand-950 px-3 py-2 shadow-sm">
@@ -75,28 +66,6 @@ export default function Footer({
               <li className="flex items-center gap-2"><Mail className="h-3.5 w-3.5 text-brand-600" /> {siteSettings.footerEmail}</li>
               <li className="flex items-center gap-2"><MapPin className="h-3.5 w-3.5 text-brand-600" /> {siteSettings.footerAddress}</li>
             </ul>
-          </div>
-
-          {/* Merchant */}
-          <div>
-            <p className="text-sm font-bold text-gray-800">{siteSettings.footerShopkeepersTitle}</p>
-            <p className="mt-3 text-xs text-gray-500">
-              {siteSettings.footerShopkeepersText}
-            </p>
-            <div className="mt-3">
-              {merchantRole ? (
-                <MerchantToggle merchantMode={merchantMode} onToggle={onToggleMerchant} />
-              ) : (
-                <button
-                  type="button"
-                  onClick={onMerchantSignIn}
-                  className="flex w-full items-center justify-center gap-2 rounded-2xl bg-gold-500 px-4 py-3 text-sm font-extrabold text-white shadow-sm transition hover:bg-gold-400 focus:outline-none focus:ring-2 focus:ring-gold-500 focus:ring-offset-2"
-                >
-                  <Briefcase className="h-4 w-4" />
-                  Sign in as Merchant
-                </button>
-              )}
-            </div>
           </div>
         </div>
 

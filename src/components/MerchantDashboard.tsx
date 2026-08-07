@@ -60,7 +60,12 @@ import {
   normalizeOrderStatus,
   type OrderStatus,
 } from '../lib/orderStatus';
-import { readLocalAdminUsers, updateLocalAdminUser, writeLocalAdminUser } from '../lib/localAdminUsers';
+import {
+  readLocalAdminUsers,
+  readSharedLocalAdminUsers,
+  updateSharedLocalAdminUser,
+  writeSharedLocalAdminUser,
+} from '../lib/localAdminUsers';
 import { CATEGORIES } from './CategoryBar';
 import ImageUploader from './ImageUploader';
 import ConfirmDeleteModal from './ConfirmDeleteModal';
@@ -118,6 +123,52 @@ type Tab =
   | 'products';
 
 const FREE_ACCESS_HEADER = 'local-free-access';
+
+function isLocalFreeAccessUser(user: UserRoleProfile) {
+  return user.invited_by === FREE_ACCESS_HEADER;
+}
+
+function mergeAccountUsers(users: UserRoleProfile[]) {
+  const byUserId = new Map<string, UserRoleProfile>();
+
+  for (const user of users) {
+    const existing = byUserId.get(user.user_id);
+    if (!existing || isLocalFreeAccessUser(existing)) {
+      byUserId.set(user.user_id, user);
+    }
+  }
+
+  return Array.from(byUserId.values());
+}
+
+function isAccountServiceUnavailable(response: Response, message?: string) {
+  return (
+    response.status === 0 ||
+    response.status === 401 ||
+    response.status === 403 ||
+    response.status === 404 ||
+    response.status >= 500 ||
+    message?.includes('Account service is not available') ||
+    message?.includes('Could not reach the account service') ||
+    message?.includes('Supabase server configuration is missing') ||
+    message?.includes('Missing auth token') ||
+    message?.includes('Only admins can manage admin accounts')
+  );
+}
+
+async function fetchAdminUsersFromSupabase() {
+  const { data, error } = await supabase
+    .from('user_roles')
+    .select('id,user_id,email,full_name,phone_number,avatar_url,role,assigned_outlet,is_approved,is_active,invited_by,last_login_at,created_at,deactivated_at')
+    .in('role', ['admin', 'attendant', 'merchant'])
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    return [];
+  }
+
+  return (data as UserRoleProfile[]) ?? [];
+}
 
 async function fetchAdminUsersApi(init: RequestInit) {
   const controller = new AbortController();
@@ -258,10 +309,24 @@ export default function MerchantDashboard({
 
   useEffect(() => {
     setLocalAdminUsers(readLocalAdminUsers());
+    void readSharedLocalAdminUsers().then(setLocalAdminUsers);
     void loadOrders();
     void loadAdminData();
     void loadAdminUsers();
   }, [profile?.assigned_outlet, role]);
+
+  useEffect(() => {
+    const refreshLocalAccounts = () => {
+      setLocalAdminUsers(readLocalAdminUsers());
+      void readSharedLocalAdminUsers().then(setLocalAdminUsers);
+    };
+    window.addEventListener('focus', refreshLocalAccounts);
+    window.addEventListener('storage', refreshLocalAccounts);
+    return () => {
+      window.removeEventListener('focus', refreshLocalAccounts);
+      window.removeEventListener('storage', refreshLocalAccounts);
+    };
+  }, []);
 
   useEffect(() => {
     const channel = supabase
@@ -388,7 +453,11 @@ export default function MerchantDashboard({
 
     if (response.ok) {
       setAdminUsers(payload.users ?? []);
+      return;
     }
+
+    setAdminUsers(await fetchAdminUsersFromSupabase());
+    setLocalAdminUsers(await readSharedLocalAdminUsers());
   };
 
   const totalRevenue = orders.reduce((s, o) => s + o.subtotal, 0);
@@ -784,7 +853,7 @@ export default function MerchantDashboard({
         />
       ) : tab === 'accounts' ? (
         <AccountManagementTab
-          users={[...localAdminUsers, ...adminUsers]}
+          users={mergeAccountUsers([...localAdminUsers, ...adminUsers])}
           outlets={outlets}
           open={accountPanelOpen}
           onOpenChange={setAccountPanelOpen}
@@ -1194,6 +1263,17 @@ function AccountManagementTab({
   const deactivateAccount = (adminUser: UserRoleProfile) => {
     const confirmed = window.confirm(`Deactivate ${adminUser.email || adminUser.user_id}? They will lose dashboard access.`);
     if (!confirmed) return;
+    if (isLocalFreeAccessUser(adminUser)) {
+      void updateSharedLocalAdminUser(adminUser.user_id, {
+        is_active: false,
+        is_approved: false,
+        deactivated_at: new Date().toISOString(),
+      }).then((users) => {
+        onLocalUsersChange(users);
+        onToast({ tone: 'success', message: 'Account deactivated.' });
+      });
+      return;
+    }
     void callAccountAction({ userId: adminUser.user_id }, 'Account deactivated.');
   };
 
@@ -1241,12 +1321,12 @@ function AccountManagementTab({
       assigned_outlet: role === 'attendant' ? assignedOutlet : null,
       is_approved: true,
       is_active: true,
-      invited_by: 'local-free-access',
+      invited_by: FREE_ACCESS_HEADER,
       created_at: new Date().toISOString(),
       last_login_at: null,
     };
 
-    onLocalUsersChange(writeLocalAdminUser(localUser));
+    onLocalUsersChange(await writeSharedLocalAdminUser(localUser));
     onToast({
       tone: 'success',
       message: 'Access saved locally for free-access mode. No email was sent.',
@@ -1291,11 +1371,7 @@ function AccountManagementTab({
 
     if (!response.ok) {
       setSaving(false);
-      const serviceUnavailable =
-        response.status === 404 ||
-        payload.message?.includes('Account service is not available') ||
-        payload.message?.includes('Could not reach the account service');
-      if (serviceUnavailable) {
+      if (isAccountServiceUnavailable(response, payload.message)) {
         setSaving(true);
         const fallbackCreated = await createLocalFallbackAccount();
         setSaving(false);
@@ -1549,7 +1625,7 @@ function EditAccountModal({
   const [error, setError] = useState('');
   const [phoneError, setPhoneError] = useState('');
   const selectedAssignedOutlet = findOutletByCode(outlets, assignedOutlet);
-  const isLocalFreeUser = user.invited_by === 'local-free-access';
+  const isLocalFreeUser = isLocalFreeAccessUser(user);
 
   const save = async (event: FormEvent) => {
     event.preventDefault();
@@ -1604,7 +1680,7 @@ function EditAccountModal({
       }
 
       if (isLocalFreeUser) {
-        onLocalUsersChange(updateLocalAdminUser(user.user_id, patch));
+        onLocalUsersChange(await updateSharedLocalAdminUser(user.user_id, patch));
         setSaving(false);
         onClose();
         onToast({ tone: 'success', message: 'Account updated successfully.' });
