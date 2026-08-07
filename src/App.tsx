@@ -513,6 +513,9 @@ function App() {
           open={merchantLoginOpen}
           onClose={() => setMerchantLoginOpen(false)}
           onSignIn={signInWithMerchant}
+          onGoogleSignIn={() =>
+            signInWithGoogle(`${window.location.origin}/merchant/dashboard`)
+          }
           onSuccess={() => {
             setMerchantLoginOpen(false);
             navigateToMerchantDashboard();

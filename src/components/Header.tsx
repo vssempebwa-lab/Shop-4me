@@ -12,6 +12,8 @@ import {
   ShieldCheck,
   X,
   Menu,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 import { useCart } from '../context/CartContext';
 import type { SiteSettings } from '../lib/siteSettings';
@@ -26,7 +28,7 @@ interface HeaderProps {
   role: 'admin' | 'attendant' | 'merchant' | 'customer' | null;
   merchantRole: boolean;
   onToggleMerchant: () => void;
-  onCustomerLogin: () => void;
+  onCustomerLogin: () => void | Promise<unknown>;
   onCustomerSignIn: (email: string, password: string) => Promise<unknown>;
   onCustomerSignUp: (email: string, password: string) => Promise<unknown>;
   onCustomerLogout: () => void;
@@ -56,6 +58,7 @@ export default function Header({
   const [authPassword, setAuthPassword] = useState('');
   const [authError, setAuthError] = useState('');
   const [showSignUp, setShowSignUp] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   const accountRef = useRef<HTMLDivElement>(null);
   const helpRef = useRef<HTMLDivElement>(null);
 
@@ -212,8 +215,16 @@ export default function Header({
                       <div className="space-y-3 p-1">
                         <button
                           type="button"
-                          onClick={() => {
-                            onCustomerLogin();
+                          onClick={async () => {
+                            setAuthError('');
+                            const error = await onCustomerLogin();
+                            if (error) {
+                              setAuthError(
+                                (error as { message?: string })?.message ||
+                                  'Google sign-in failed. Check Supabase Google provider and redirect URLs.',
+                              );
+                              return;
+                            }
                             setAccountOpen(false);
                           }}
                           className="flex w-full items-center justify-center gap-3 rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm font-medium text-gray-700 transition hover:bg-gray-50 hover:border-gray-300"
@@ -226,6 +237,13 @@ export default function Header({
                           </svg>
                           Sign in with Google
                         </button>
+                        <div className="flex items-center gap-3 px-1">
+                          <div className="h-px flex-1 bg-gray-200" />
+                          <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+                            or
+                          </span>
+                          <div className="h-px flex-1 bg-gray-200" />
+                        </div>
                         <div className="rounded-2xl bg-gray-50 p-3">
                           <div className="flex items-center justify-between gap-3">
                             <button
@@ -275,12 +293,26 @@ export default function Header({
                             </label>
                             <label className="block text-xs font-semibold text-gray-600">
                               Password
-                              <input
-                                type="password"
-                                value={authPassword}
-                                onChange={(e) => setAuthPassword(e.target.value)}
-                                className="mt-1 w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-brand-400 focus:ring-2 focus:ring-brand-100"
-                              />
+                              <span className="relative mt-1 block">
+                                <input
+                                  type={showPassword ? 'text' : 'password'}
+                                  value={authPassword}
+                                  onChange={(e) => setAuthPassword(e.target.value)}
+                                  className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 pr-10 text-sm outline-none transition focus:border-brand-400 focus:ring-2 focus:ring-brand-100"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => setShowPassword((v) => !v)}
+                                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg p-1 text-gray-400 transition hover:bg-gray-100 hover:text-gray-600 focus:outline-none focus:ring-2 focus:ring-brand-200"
+                                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                                >
+                                  {showPassword ? (
+                                    <EyeOff className="h-4 w-4" />
+                                  ) : (
+                                    <Eye className="h-4 w-4" />
+                                  )}
+                                </button>
+                              </span>
                             </label>
                             {authError && (
                               <p className="text-xs font-medium text-red-600">{authError}</p>

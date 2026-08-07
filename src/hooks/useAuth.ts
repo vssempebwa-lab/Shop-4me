@@ -88,13 +88,35 @@ export function useAuth() {
     return () => subscription.unsubscribe();
   }, []);
 
-  const signInWithGoogle = async () => {
-    await supabase.auth.signInWithOAuth({
+  const signInWithGoogle = async (redirectTo?: string) => {
+    const { data, error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
-        redirectTo: window.location.origin,
+        redirectTo: redirectTo ?? window.location.origin,
+        // Force account picker + consent so Google doesn't silently reuse a prior grant
+        skipBrowserRedirect: true,
+        queryParams: {
+          access_type: 'offline',
+          prompt: 'consent select_account',
+        },
       },
     });
+
+    if (error) {
+      console.error('Google sign-in failed', error);
+      return error;
+    }
+
+    if (!data?.url) {
+      const missingUrlError = {
+        message: 'Google sign-in did not return an auth URL. Check the Google provider in Supabase.',
+      };
+      console.error('Google sign-in failed', missingUrlError);
+      return missingUrlError;
+    }
+
+    window.location.assign(data.url);
+    return null;
   };
 
   const signInWithEmail = async (email: string, password: string) => {
