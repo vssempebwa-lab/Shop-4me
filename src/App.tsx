@@ -13,6 +13,8 @@ import { hasSupabaseConfig, supabase } from './lib/supabase';
 import {
   DEFAULT_SITE_SETTINGS,
   fetchSiteSettings,
+  getCategoryContent,
+  getCategoryDisplayLabel,
   type SiteSettings,
 } from './lib/siteSettings';
 import { useAuth } from './hooks/useAuth';
@@ -71,6 +73,10 @@ function defaultLocalAttendantProfile(localAttendant: UserRoleProfile | null): U
     ? {
         ...localAttendant,
         assigned_outlet: localAttendant.assigned_outlet || 'DEPOT-KAW-01',
+        invited_by: localAttendant.invited_by || 'local-free-access',
+        role: 'attendant',
+        is_active: true,
+        is_approved: true,
       }
     : {
         user_id: '00000000-0000-4000-8000-000000000001',
@@ -78,6 +84,7 @@ function defaultLocalAttendantProfile(localAttendant: UserRoleProfile | null): U
         full_name: 'Local Market Attendant',
         role: 'attendant',
         assigned_outlet: 'DEPOT-KAW-01',
+        invited_by: 'local-free-access',
         is_active: true,
         is_approved: true,
       };
@@ -89,6 +96,7 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [activeCategory, setActiveCategory] = useState<Category | 'All'>('All');
+  const [browsingCategory, setBrowsingCategory] = useState<Category | null>(null);
   const [cartOpen, setCartOpen] = useState(false);
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [selectedOutletCode, setSelectedOutletCode] = useState(() => {
@@ -133,12 +141,6 @@ function App() {
     if (localWorkspace !== 'admin') window.history.pushState({}, '', '/merchant/dashboard');
     setAttendantMode(false);
     setMerchantMode(true);
-  };
-
-  const navigateToAttendantWorkspace = () => {
-    if (localWorkspace !== 'attendant') window.history.pushState({}, '', '/attendant/workspace');
-    setMerchantMode(false);
-    setAttendantMode(true);
   };
 
   const navigateToStorefront = () => {
@@ -317,7 +319,6 @@ function App() {
                 is_approved: true,
               }
             }
-            onOpenAttendantWorkspace={navigateToAttendantWorkspace}
             onProductsChanged={loadProducts}
             siteSettings={siteSettings}
             onSiteSettingsChanged={setSiteSettings}
@@ -409,7 +410,6 @@ function App() {
                   is_approved: true,
                 }
               }
-              onOpenAttendantWorkspace={navigateToAttendantWorkspace}
               onProductsChanged={loadProducts}
               siteSettings={siteSettings}
               onSiteSettingsChanged={setSiteSettings}
@@ -417,26 +417,51 @@ function App() {
           </main>
         ) : (
           <main className="flex-1">
-            <HeroSection siteSettings={siteSettings} />
-            <div className="mx-auto max-w-7xl space-y-8 px-4 py-8">
-              <CategoryHighlights siteSettings={siteSettings} />
-              <div id="catalog" className="space-y-4">
-                <div className="flex flex-wrap items-end justify-between gap-2">
+            {browsingCategory ? (
+              <div className="mx-auto max-w-7xl space-y-6 px-4 py-8">
+                <div className="space-y-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setBrowsingCategory(null);
+                      setActiveCategory('All');
+                      window.scrollTo({ top: 0, behavior: 'smooth' });
+                    }}
+                    className="inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white px-3.5 py-2 text-sm font-semibold text-gray-700 transition hover:border-brand-300 hover:bg-brand-50 hover:text-brand-700"
+                  >
+                    ← Back to categories
+                  </button>
                   <div>
-                    <h2 className="text-2xl font-extrabold text-brand-800">
-                      {activeCategory === 'All' ? 'All Products' : activeCategory}
-                    </h2>
-                    <p className="text-sm text-gray-500">
-                      Fresh items priced in Ugandan Shilling, delivered to your door.
+                    <p className="text-xs font-bold uppercase tracking-wide text-brand-600">
+                      Category
+                    </p>
+                    <h1 className="mt-1 text-3xl font-extrabold text-brand-800">
+                      {getCategoryDisplayLabel(siteSettings, browsingCategory)}
+                    </h1>
+                    <p className="mt-1 max-w-2xl text-sm text-gray-500">
+                      {getCategoryContent(siteSettings, browsingCategory)?.blurb ||
+                        'Browse items in this category, priced in Ugandan Shilling.'}
                     </p>
                   </div>
                 </div>
+
                 <CategoryBar
                   active={activeCategory}
-                  onSelect={setActiveCategory}
+                  onSelect={(category) => {
+                    if (category === 'All') {
+                      setBrowsingCategory(null);
+                      setActiveCategory('All');
+                      window.scrollTo({ top: 0, behavior: 'smooth' });
+                      return;
+                    }
+                    setBrowsingCategory(category);
+                    setActiveCategory(category);
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                  }}
                   counts={counts}
                   siteSettings={siteSettings}
                 />
+
                 {dbError && (
                   <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
                     {hasSupabaseConfig
@@ -444,15 +469,65 @@ function App() {
                       : 'Supabase is not configured yet. Please add your project URL and anon key to the environment file.'}
                   </div>
                 )}
+
                 <ProductGrid
                   products={products}
-                  activeCategory={activeCategory}
+                  activeCategory={browsingCategory}
                   search={search}
                   loading={loading}
                   siteSettings={siteSettings}
                 />
               </div>
-            </div>
+            ) : (
+              <>
+                <HeroSection siteSettings={siteSettings} />
+                <div className="mx-auto max-w-7xl space-y-8 px-4 py-8">
+                  <CategoryHighlights
+                    siteSettings={siteSettings}
+                    onSelectCategory={(category) => {
+                      setBrowsingCategory(category);
+                      setActiveCategory(category);
+                      setSearch('');
+                      window.scrollTo({ top: 0, behavior: 'smooth' });
+                    }}
+                  />
+                  <div id="catalog" className="space-y-4">
+                    <div className="flex flex-wrap items-end justify-between gap-2">
+                      <div>
+                        <h2 className="text-2xl font-extrabold text-brand-800">
+                          {activeCategory === 'All'
+                            ? 'All Products'
+                            : getCategoryDisplayLabel(siteSettings, activeCategory)}
+                        </h2>
+                        <p className="text-sm text-gray-500">
+                          Fresh items priced in Ugandan Shilling, delivered to your door.
+                        </p>
+                      </div>
+                    </div>
+                    <CategoryBar
+                      active={activeCategory}
+                      onSelect={setActiveCategory}
+                      counts={counts}
+                      siteSettings={siteSettings}
+                    />
+                    {dbError && (
+                      <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+                        {hasSupabaseConfig
+                          ? `Products are temporarily unavailable: ${dbError}`
+                          : 'Supabase is not configured yet. Please add your project URL and anon key to the environment file.'}
+                      </div>
+                    )}
+                    <ProductGrid
+                      products={products}
+                      activeCategory={activeCategory}
+                      search={search}
+                      loading={loading}
+                      siteSettings={siteSettings}
+                    />
+                  </div>
+                </div>
+              </>
+            )}
           </main>
         )}
 

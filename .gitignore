@@ -25,3 +25,6 @@ dist-ssr
 # Google OAuth credentials (never commit)
 client_secret*.json
 .secrets/
+
+# Local free-access shared demo orders (synced across admin/attendant ports)
+data/local-demo-orders.json

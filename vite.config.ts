@@ -6,6 +6,7 @@ import type { IncomingMessage } from 'node:http';
 import type { Plugin } from 'vite';
 
 const localAdminUsersFile = path.resolve(process.cwd(), 'data/local-admin-users.json');
+const localDemoOrdersFile = path.resolve(process.cwd(), 'data/local-demo-orders.json');
 
 function localAdminUsersPlugin(): Plugin {
   return {
@@ -51,6 +52,36 @@ function localAdminUsersPlugin(): Plugin {
           );
         }
       });
+
+      server.middlewares.use('/local-api/demo-orders', async (req, res) => {
+        try {
+          res.setHeader('Content-Type', 'application/json');
+
+          if (req.method === 'GET') {
+            res.end(JSON.stringify({ orders: await readLocalDemoOrdersFile() }));
+            return;
+          }
+
+          if (req.method === 'PUT') {
+            const body = await readJsonBody(req);
+            const orders = Array.isArray(body.orders) ? body.orders : [];
+            const nextOrders = mergeOrders(orders);
+            await writeLocalDemoOrdersFile(nextOrders);
+            res.end(JSON.stringify({ orders: nextOrders }));
+            return;
+          }
+
+          res.statusCode = 405;
+          res.end(JSON.stringify({ message: 'Method not allowed.' }));
+        } catch (error) {
+          res.statusCode = 500;
+          res.end(
+            JSON.stringify({
+              message: error instanceof Error ? error.message : 'Local demo order store failed.',
+            }),
+          );
+        }
+      });
     },
   };
 }
@@ -69,6 +100,20 @@ async function writeLocalAdminUsersFile(users: unknown[]) {
   await fs.writeFile(localAdminUsersFile, `${JSON.stringify(mergeUsers(users), null, 2)}\n`);
 }
 
+async function readLocalDemoOrdersFile() {
+  try {
+    const raw = await fs.readFile(localDemoOrdersFile, 'utf8');
+    return mergeOrders(JSON.parse(raw));
+  } catch {
+    return [];
+  }
+}
+
+async function writeLocalDemoOrdersFile(orders: unknown[]) {
+  await fs.mkdir(path.dirname(localDemoOrdersFile), { recursive: true });
+  await fs.writeFile(localDemoOrdersFile, `${JSON.stringify(mergeOrders(orders), null, 2)}\n`);
+}
+
 function mergeUsers(users: unknown[]) {
   const byUserId = new Map<string, Record<string, unknown>>();
 
@@ -81,6 +126,22 @@ function mergeUsers(users: unknown[]) {
   }
 
   return Array.from(byUserId.values()).sort((a, b) =>
+    String(b.created_at || '').localeCompare(String(a.created_at || '')),
+  );
+}
+
+function mergeOrders(orders: unknown[]) {
+  const byId = new Map<string, Record<string, unknown>>();
+
+  for (const order of orders) {
+    if (!order || typeof order !== 'object') continue;
+    const candidate = order as Record<string, unknown>;
+    const orderId = String(candidate.id || '').trim();
+    if (!orderId) continue;
+    byId.set(orderId, candidate);
+  }
+
+  return Array.from(byId.values()).sort((a, b) =>
     String(b.created_at || '').localeCompare(String(a.created_at || '')),
   );
 }

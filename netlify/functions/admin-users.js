@@ -208,6 +208,49 @@ async function deactivateAccount(event, supabaseAdmin, actorId) {
   return json(200, { ok: true });
 }
 
+async function activateAccount(event, supabaseAdmin, actorId) {
+  const body = JSON.parse(event.body || '{}');
+  const userId = String(body.userId || '').trim();
+
+  if (!userId) return json(400, { message: 'Missing userId.' });
+  if (userId === actorId) return json(400, { message: 'Your account is already active.' });
+
+  const { data: targetRole, error: targetError } = await supabaseAdmin
+    .from('user_roles')
+    .select('role,is_active')
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (targetError || !targetRole) {
+    return json(404, { message: 'Account not found.' });
+  }
+
+  if (targetRole.is_active !== false) {
+    return json(200, { ok: true, message: 'Account is already active.' });
+  }
+
+  const { error } = await supabaseAdmin
+    .from('user_roles')
+    .update({
+      is_active: true,
+      is_approved: true,
+      deactivated_at: null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('user_id', userId);
+
+  if (error) return json(400, { message: error.message || 'Could not activate account.' });
+
+  await supabaseAdmin.from('admin_audit_logs').insert({
+    actor_user_id: actorId,
+    action: 'account_activated',
+    target_type: 'user_role',
+    target_id: userId,
+  });
+
+  return json(200, { ok: true });
+}
+
 async function resetPassword(event, supabaseAdmin, actorId) {
   const body = JSON.parse(event.body || '{}');
   const userId = String(body.userId || '').trim();
@@ -338,6 +381,9 @@ export async function handler(event) {
     }
     if (body.action === 'reset_password') {
       return resetPassword(event, supabaseAdmin, adminCheck.user.id);
+    }
+    if (body.action === 'activate') {
+      return activateAccount(event, supabaseAdmin, adminCheck.user.id);
     }
     return deactivateAccount(event, supabaseAdmin, adminCheck.user.id);
   }

@@ -7,12 +7,12 @@
     "avatar_url": null,
     "role": "attendant",
     "assigned_outlet": "DEPOT-MAK-04",
-    "is_approved": false,
-    "is_active": false,
+    "is_approved": true,
+    "is_active": true,
     "invited_by": "local-free-access",
     "created_at": "2026-08-07T12:50:25.530Z",
     "last_login_at": null,
-    "deactivated_at": "2026-08-07T12:52:22.358Z"
+    "deactivated_at": null
   },
   {
     "user_id": "d0fd4339-6f8b-4ab4-87ec-2b1971721a90",

@@ -53,7 +53,7 @@ import {
   OFFICIAL_OUTLETS,
   suggestOutletFromText,
 } from '../lib/outlets';
-import { DEMO_ORDER_PREFIX, readDemoOrders, updateDemoOrder } from '../lib/demoOrders';
+import { DEMO_ORDER_PREFIX, readDemoOrders, readSharedDemoOrders, updateSharedDemoOrder } from '../lib/demoOrders';
 import {
   getNextOrderStatus,
   getStatusDisplay,
@@ -105,7 +105,6 @@ interface MerchantDashboardProps {
   user: SupabaseUser | null;
   role: AppRole;
   profile: UserRoleProfile | null;
-  onOpenAttendantWorkspace?: () => void;
   onProductsChanged: () => void;
   siteSettings: SiteSettings;
   onSiteSettingsChanged: (settings: SiteSettings) => void;
@@ -266,7 +265,6 @@ export default function MerchantDashboard({
   user,
   role,
   profile,
-  onOpenAttendantWorkspace,
   onProductsChanged,
   siteSettings,
   onSiteSettingsChanged,
@@ -289,6 +287,7 @@ export default function MerchantDashboard({
   const [sharingOrderId, setSharingOrderId] = useState<string | null>(null);
   const [shareError, setShareError] = useState<string | null>(null);
   const [dispatchOrder, setDispatchOrder] = useState<Order | null>(null);
+  const [reverseOrder, setReverseOrder] = useState<Order | null>(null);
   const [accountPanelOpen, setAccountPanelOpen] = useState(false);
   const [localAdminUsers, setLocalAdminUsers] = useState<UserRoleProfile[]>([]);
   const [pendingDelete, setPendingDelete] = useState<Product | null>(null);
@@ -354,6 +353,8 @@ export default function MerchantDashboard({
 
   const loadOrders = async () => {
     setLoadingOrders(true);
+    await readSharedDemoOrders();
+
     let query = supabase
       .from('orders')
       .select('*, order_items(*)')
@@ -366,9 +367,10 @@ export default function MerchantDashboard({
     }
 
     const { data, error } = await query;
+    const demoOrders = getDemoOrdersForDashboard(isAttendant, profile?.assigned_outlet);
 
     if (error) {
-      setOrders(isAdmin ? getDemoOrdersForDashboard(isAttendant, profile?.assigned_outlet) : []);
+      setOrders(demoOrders);
       setLoadingOrders(false);
       return;
     }
@@ -395,7 +397,6 @@ export default function MerchantDashboard({
     });
 
     const liveOrders = normalizedOrders.map(normalizeOrder);
-    const demoOrders = isAdmin ? getDemoOrdersForDashboard(isAttendant, profile?.assigned_outlet) : [];
     const liveIds = new Set(liveOrders.map((order) => order.id));
     const localOnlyOrders = demoOrders.filter((order) => !liveIds.has(order.id));
     const nextOrders = [...localOnlyOrders, ...liveOrders];
@@ -415,6 +416,7 @@ export default function MerchantDashboard({
         .select('*')
         .in('action', [
           'order_shared_to_outlet',
+          'order_returned_to_queue',
           'rider_dispatched',
           'order_delivered_paid',
           'outlet_order_status_changed',
@@ -508,10 +510,10 @@ export default function MerchantDashboard({
         shared_by_admin_name: adminName,
         manual_outlet_override: manualOverride,
         suggested_outlet_code: suggestedOutletCode ?? null,
-        order_status: 'Processing',
-        status: 'Processing',
+        order_status: 'Order Received',
+        status: 'Order Received',
       });
-      updateDemoOrder(routedOrder);
+      await updateSharedDemoOrder(routedOrder);
       setOrders((current) =>
         current.map((order) => (order.id === targetOrder.id ? routedOrder : order)),
       );
@@ -520,7 +522,9 @@ export default function MerchantDashboard({
       setShareOutlet('');
       showToast({
         tone: 'success',
-        message: manualOverride ? 'Demo order shared with manual outlet override.' : 'Demo order shared to outlet.',
+        message: manualOverride
+          ? `Order shared to ${targetOutlet} (manual override). Open the attendant for that outlet.`
+          : `Order shared to ${targetOutlet}. It will appear on that outlet's attendant dashboard.`,
       });
       return;
     }
@@ -537,8 +541,8 @@ export default function MerchantDashboard({
         shared_by_admin_name: adminName,
         manual_outlet_override: manualOverride,
         suggested_outlet_code: suggestedOutletCode ?? null,
-        order_status: 'Processing',
-        status: 'Processing',
+        order_status: 'Order Received',
+        status: 'Order Received',
       })
       .eq('id', targetOrder.id);
 
@@ -567,6 +571,72 @@ export default function MerchantDashboard({
     showToast({ tone: 'success', message: 'Order shared to outlet.' });
   };
 
+  const returnOrderToQueue = async (order: Order) => {
+    if (!order.is_shared_with_outlet) {
+      showToast({ tone: 'error', message: 'This order is already in the pending queue.' });
+      setReverseOrder(null);
+      return;
+    }
+
+    setSharingOrderId(order.id);
+
+    const patch: Partial<Order> = {
+      is_shared_with_outlet: false,
+      shared_at: null,
+      shared_by: null,
+      shared_by_admin_id: null,
+      shared_by_admin_name: null,
+      manual_outlet_override: null,
+      suggested_outlet_code: null,
+      outlet_code: null,
+      division: null,
+      dispatched_rider_id: null,
+      dispatched_rider_name: null,
+      dispatched_at: null,
+      handled_by_attendant_id: null,
+      handled_by_attendant_name: null,
+      delivered_at: null,
+      order_status: 'Order Received',
+      status: 'Order Received',
+    };
+
+    if (isDemoOrder(order)) {
+      const updatedOrder = normalizeOrder({ ...order, ...patch });
+      updateSharedDemoOrder(updatedOrder);
+      setOrders((current) =>
+        current.map((item) => (item.id === order.id ? updatedOrder : item)),
+      );
+      setSharingOrderId(null);
+      setReverseOrder(null);
+      showToast({ tone: 'success', message: 'Order reversed back to pending queue.' });
+      return;
+    }
+
+    const { error } = await supabase.from('orders').update(patch).eq('id', order.id);
+
+    if (error) {
+      setSharingOrderId(null);
+      showToast({
+        tone: 'error',
+        message: error.message || 'Could not reverse order to the pending queue.',
+      });
+      return;
+    }
+
+    await writeAuditLog('order_returned_to_queue', order.id, {
+      previous_outlet_code: order.outlet_code ?? null,
+      previous_status: order.order_status ?? order.status,
+      previous_shared_by_admin_name: order.shared_by_admin_name ?? null,
+      contact_name: order.contact_name,
+    });
+
+    setSharingOrderId(null);
+    setReverseOrder(null);
+    await loadOrders();
+    await loadAdminData();
+    showToast({ tone: 'success', message: 'Order reversed back to pending queue.' });
+  };
+
   const changeOutletOrderStatus = async (
     order: Order,
     nextStatus: OrderStatus,
@@ -585,7 +655,7 @@ export default function MerchantDashboard({
 
     if (isDemoOrder(order)) {
       const updatedOrder = normalizeOrder({ ...order, ...patch });
-      updateDemoOrder(updatedOrder);
+      updateSharedDemoOrder(updatedOrder);
       setOrders((current) =>
         current.map((item) => (item.id === order.id ? updatedOrder : item)),
       );
@@ -624,7 +694,7 @@ export default function MerchantDashboard({
 
     if (isDemoOrder(order)) {
       const updatedOrder = normalizeOrder({ ...order, ...patch });
-      updateDemoOrder(updatedOrder);
+      updateSharedDemoOrder(updatedOrder);
       setDispatchOrder(null);
       setOrders((current) =>
         current.map((item) => (item.id === order.id ? updatedOrder : item)),
@@ -668,7 +738,7 @@ export default function MerchantDashboard({
 
     if (isDemoOrder(order)) {
       const updatedOrder = normalizeOrder({ ...order, ...patch });
-      updateDemoOrder(updatedOrder);
+      updateSharedDemoOrder(updatedOrder);
       setOrders((current) =>
         current.map((item) => (item.id === order.id ? updatedOrder : item)),
       );
@@ -766,11 +836,6 @@ export default function MerchantDashboard({
 
       {/* Tabs */}
       <div className="mt-6 flex gap-2 overflow-x-auto border-b border-gray-200">
-        {onOpenAttendantWorkspace && (
-          <TabButton active={false} onClick={onOpenAttendantWorkspace}>
-            <Building2 className="h-4 w-4" /> Attendant Workspace
-          </TabButton>
-        )}
         {isAdmin && (
           <TabButton active={tab === 'pending'} onClick={() => setTab('pending')}>
             <Share2 className="h-4 w-4" /> Pending Queue
@@ -839,6 +904,8 @@ export default function MerchantDashboard({
         <OrdersTab
           orders={orders}
           loading={loadingOrders}
+          reversingOrderId={sharingOrderId}
+          onReverse={isAdmin ? setReverseOrder : undefined}
         />
       ) : tab === 'attendant' ? (
         <AttendantQueueTab
@@ -900,6 +967,8 @@ export default function MerchantDashboard({
         <OrdersTab
           orders={orders}
           loading={loadingOrders}
+          reversingOrderId={sharingOrderId}
+          onReverse={isAdmin ? setReverseOrder : undefined}
         />
       )}
 
@@ -925,6 +994,82 @@ export default function MerchantDashboard({
           onClose={() => setDispatchOrder(null)}
           onDispatch={(rider) => void dispatchRider(dispatchOrder, rider)}
         />
+      )}
+
+      {reverseOrder && (
+        <div className="fixed inset-0 z-[70] flex items-end justify-center px-0 sm:items-center sm:px-4">
+          <button
+            type="button"
+            aria-label="Leave order unchanged"
+            className="absolute inset-0 cursor-default bg-brand-950/55 backdrop-blur-sm"
+            onClick={() => {
+              if (sharingOrderId === reverseOrder.id) return;
+              setReverseOrder(null);
+            }}
+          />
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="reverse-order-title"
+            className="relative w-full max-w-md overflow-hidden rounded-t-3xl bg-white p-5 shadow-2xl animate-slide-up sm:rounded-3xl"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-wide text-brand-600">Order action</p>
+                <h2 id="reverse-order-title" className="mt-1 text-xl font-extrabold text-brand-900">
+                  Reverse order?
+                </h2>
+                <p className="mt-2 text-sm text-gray-600">
+                  Reverse #{reverseOrder.id.slice(0, 8).toUpperCase()} back to the pending queue so it can be
+                  shared to another outlet, or leave it as it is.
+                </p>
+                {reverseOrder.outlet_code && (
+                  <p className="mt-2 text-xs font-semibold text-gray-500">
+                    Current outlet: {reverseOrder.outlet_code}
+                  </p>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => setReverseOrder(null)}
+                disabled={sharingOrderId === reverseOrder.id}
+                className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-gray-500 transition hover:bg-gray-100 disabled:opacity-50"
+                aria-label="Leave it"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={() => setReverseOrder(null)}
+                disabled={sharingOrderId === reverseOrder.id}
+                className="rounded-full border border-gray-200 px-4 py-2.5 text-sm font-semibold text-gray-700 transition hover:bg-gray-50 disabled:opacity-50"
+              >
+                Leave it
+              </button>
+              <button
+                type="button"
+                onClick={() => void returnOrderToQueue(reverseOrder)}
+                disabled={sharingOrderId === reverseOrder.id}
+                className="inline-flex items-center justify-center gap-2 rounded-full bg-brand-600 px-4 py-2.5 text-sm font-extrabold text-white transition hover:bg-brand-700 disabled:opacity-60"
+              >
+                {sharingOrderId === reverseOrder.id ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Reversing...
+                  </>
+                ) : (
+                  <>
+                    <RotateCcw className="h-4 w-4" />
+                    Reverse
+                  </>
+                )}
+              </button>
+            </div>
+          </section>
+        </div>
       )}
 
       <ConfirmDeleteModal
@@ -1274,15 +1419,31 @@ function AccountManagementTab({
       });
       return;
     }
-    void callAccountAction({ userId: adminUser.user_id }, 'Account deactivated.');
+    void callAccountAction(
+      { action: 'deactivate', userId: adminUser.user_id },
+      'Account deactivated.',
+    );
   };
 
-  const resetPassword = (adminUser: UserRoleProfile) => {
-    const nextPassword = window.prompt(`Enter a new temporary password for ${adminUser.email || adminUser.user_id}.`);
-    if (!nextPassword) return;
+  const activateAccount = (adminUser: UserRoleProfile) => {
+    const confirmed = window.confirm(
+      `Activate ${adminUser.email || adminUser.user_id}? They will regain dashboard access.`,
+    );
+    if (!confirmed) return;
+    if (isLocalFreeAccessUser(adminUser)) {
+      void updateSharedLocalAdminUser(adminUser.user_id, {
+        is_active: true,
+        is_approved: true,
+        deactivated_at: null,
+      }).then((users) => {
+        onLocalUsersChange(users);
+        onToast({ tone: 'success', message: 'Account activated.' });
+      });
+      return;
+    }
     void callAccountAction(
-      { action: 'reset_password', userId: adminUser.user_id, password: nextPassword },
-      'Password reset successfully.',
+      { action: 'activate', userId: adminUser.user_id },
+      'Account activated.',
     );
   };
 
@@ -1560,21 +1721,23 @@ function AccountManagementTab({
                         <Pencil className="h-3.5 w-3.5" />
                         Edit
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => resetPassword(adminUser)}
-                        className="rounded-full border border-gray-200 px-3 py-1.5 text-xs font-semibold text-gray-700 transition hover:border-brand-300 hover:bg-brand-50"
-                      >
-                        Reset
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => deactivateAccount(adminUser)}
-                        disabled={adminUser.is_active === false}
-                        className="rounded-full border border-red-100 px-3 py-1.5 text-xs font-semibold text-red-600 transition hover:border-red-200 hover:bg-red-50 disabled:cursor-not-allowed disabled:text-gray-300"
-                      >
-                        Deactivate
-                      </button>
+                      {adminUser.is_active === false ? (
+                        <button
+                          type="button"
+                          onClick={() => activateAccount(adminUser)}
+                          className="rounded-full border border-brand-200 bg-brand-50 px-3 py-1.5 text-xs font-semibold text-brand-700 transition hover:border-brand-300 hover:bg-brand-100"
+                        >
+                          Activate
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => deactivateAccount(adminUser)}
+                          className="rounded-full border border-red-100 px-3 py-1.5 text-xs font-semibold text-red-600 transition hover:border-red-200 hover:bg-red-50"
+                        >
+                          Deactivate
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -3666,9 +3829,13 @@ function buildPaymentSettingsChanges(previous: PaymentSettings, next: PaymentSet
 function OrdersTab({
   orders,
   loading,
+  reversingOrderId,
+  onReverse,
 }: {
   orders: Order[];
   loading: boolean;
+  reversingOrderId?: string | null;
+  onReverse?: (order: Order) => void;
 }) {
   if (loading) {
     return (
@@ -3690,6 +3857,8 @@ function OrdersTab({
     <div className="mt-4 space-y-3">
       {orders.map((o) => {
         const statusDisplay = getStatusDisplay(o.order_status ?? o.status);
+        const canReverse = Boolean(onReverse && o.is_shared_with_outlet);
+        const reversing = reversingOrderId === o.id;
         return (
         <div
           key={o.id}
@@ -3710,6 +3879,15 @@ function OrdersTab({
               >
                 <CheckCircle2 className="h-3.5 w-3.5" /> {statusDisplay.label}
               </span>
+              {o.is_shared_with_outlet ? (
+                <span className="rounded-full bg-brand-50 px-2.5 py-1 text-xs font-semibold text-brand-700 ring-1 ring-brand-100">
+                  Shared
+                </span>
+              ) : (
+                <span className="rounded-full bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700 ring-1 ring-amber-100">
+                  In queue
+                </span>
+              )}
             </div>
           </div>
           <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
@@ -3741,6 +3919,23 @@ function OrdersTab({
               <span className="text-sm font-extrabold text-brand-700">{formatUGX(getOrderTotal(o))}</span>
             </div>
           </div>
+          {onReverse && (
+            <div className="mt-3 flex justify-end">
+              <button
+                type="button"
+                onClick={() => onReverse(o)}
+                disabled={!canReverse || reversing}
+                className="inline-flex items-center gap-1.5 rounded-full border border-brand-200 bg-brand-50 px-3.5 py-2 text-xs font-bold text-brand-700 transition hover:border-brand-300 hover:bg-brand-100 disabled:cursor-not-allowed disabled:border-gray-200 disabled:bg-gray-50 disabled:text-gray-400"
+              >
+                {reversing ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <RotateCcw className="h-3.5 w-3.5" />
+                )}
+                Reverse
+              </button>
+            </div>
+          )}
         </div>
         );
       })}

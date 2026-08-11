@@ -4,7 +4,7 @@ import { useCart } from '../context/CartContext';
 import { formatUGX } from '../lib/format';
 import { supabase } from '../lib/supabase';
 import type { Outlet, Order, OrderItem, UserRoleProfile } from '../types';
-import { DEMO_ORDER_PREFIX, updateDemoOrder } from '../lib/demoOrders';
+import { DEMO_ORDER_PREFIX, updateSharedDemoOrder } from '../lib/demoOrders';
 import { getStatusDisplay } from '../lib/orderStatus';
 import {
   findOutletByCode,
@@ -238,7 +238,7 @@ export default function CheckoutModal({
         user_id: null,
       };
 
-      updateDemoOrder(localOrder);
+      updateSharedDemoOrder(localOrder);
       finishOrder(localOrder);
     };
 

@@ -18,7 +18,7 @@ import {
   formatDistributionAreas,
   OFFICIAL_OUTLETS,
 } from '../lib/outlets';
-import { DEMO_ORDER_PREFIX, readDemoOrders, updateDemoOrder } from '../lib/demoOrders';
+import { DEMO_ORDER_PREFIX, readDemoOrders, readSharedDemoOrders, updateSharedDemoOrder } from '../lib/demoOrders';
 import { formatUGX } from '../lib/format';
 import {
   getNextOrderStatus,
@@ -59,8 +59,14 @@ export default function AttendantWorkspace({
   const [paymentOrder, setPaymentOrder] = useState<Order | null>(null);
   const [paymentConfirmed, setPaymentConfirmed] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const isLocalFreeAccess = profile?.invited_by === 'local-free-access';
+  const [localOutletOverride, setLocalOutletOverride] = useState(() => {
+    if (typeof window === 'undefined') return '';
+    return window.sessionStorage.getItem('sfm-attendant-outlet-override') || '';
+  });
 
-  const assignedOutlet = profile?.assigned_outlet ?? '';
+  const assignedOutlet =
+    (isLocalFreeAccess && localOutletOverride) || profile?.assigned_outlet || '';
   const attendantName = profile?.full_name || profile?.email || 'Market Attendant';
   const attendantUserId = profile?.user_id ?? null;
   const profileUser: UserRoleProfile = profile ?? {
@@ -91,6 +97,18 @@ export default function AttendantWorkspace({
 
   useEffect(() => {
     void loadWorkspaceData();
+  }, [assignedOutlet]);
+
+  useEffect(() => {
+    const refreshSharedOrders = () => {
+      void loadOrders();
+    };
+    window.addEventListener('focus', refreshSharedOrders);
+    const intervalId = window.setInterval(refreshSharedOrders, 4000);
+    return () => {
+      window.removeEventListener('focus', refreshSharedOrders);
+      window.clearInterval(intervalId);
+    };
   }, [assignedOutlet]);
 
   useEffect(() => {
@@ -185,6 +203,8 @@ export default function AttendantWorkspace({
       return;
     }
 
+    await readSharedDemoOrders();
+
     const { data, error } = await supabase
       .from('orders')
       .select('*, order_items(*)')
@@ -222,7 +242,7 @@ export default function AttendantWorkspace({
 
     if (order.id.startsWith(DEMO_ORDER_PREFIX)) {
       const updatedOrder = { ...order, ...patch };
-      updateDemoOrder(updatedOrder);
+      await updateSharedDemoOrder(updatedOrder);
       setOrders((current) =>
         current.map((item) => (item.id === order.id ? updatedOrder : item)),
       );
@@ -265,7 +285,7 @@ export default function AttendantWorkspace({
 
     if (order.id.startsWith(DEMO_ORDER_PREFIX)) {
       const updatedOrder = { ...order, ...patch };
-      updateDemoOrder(updatedOrder);
+      await updateSharedDemoOrder(updatedOrder);
       setDispatchOrder(null);
       setOrders((current) =>
         current.map((item) => (item.id === order.id ? updatedOrder : item)),
@@ -325,7 +345,9 @@ export default function AttendantWorkspace({
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h2 className="text-2xl font-extrabold text-brand-800">Market Attendant Workspace</h2>
-          <p className="text-sm text-gray-500">Process routed orders from your assigned hub.</p>
+          <p className="text-sm text-gray-500">
+            View orders shared by admin, then move each one through Received → Processing → Transit → Delivered.
+          </p>
         </div>
         {outlet ? (
           <div className="min-w-[280px] rounded-2xl border border-brand-100 bg-white px-4 py-3 shadow-sm">
@@ -336,6 +358,29 @@ export default function AttendantWorkspace({
                   {outlet.hub_market || outlet.name} - {outlet.outlet_code}
                 </p>
                 <p className="text-xs font-medium text-brand-700">{outlet.division}</p>
+                {isLocalFreeAccess && (
+                  <label className="mt-2 block text-[11px] font-semibold text-gray-600">
+                    View outlet queue
+                    <select
+                      value={assignedOutlet}
+                      onChange={(event) => {
+                        const nextOutlet = event.target.value;
+                        setLocalOutletOverride(nextOutlet);
+                        window.sessionStorage.setItem(
+                          'sfm-attendant-outlet-override',
+                          nextOutlet,
+                        );
+                      }}
+                      className="mt-1 w-full rounded-xl border border-gray-200 bg-white px-2.5 py-2 text-xs font-semibold text-gray-800 outline-none transition focus:border-brand-400 focus:ring-2 focus:ring-brand-100"
+                    >
+                      {outlets.map((item) => (
+                        <option key={item.outlet_code} value={item.outlet_code}>
+                          {formatOutletOption(item)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
                 <p className="mt-2 text-xs font-semibold text-gray-700">
                   Attendant: {attendantName}
                 </p>
@@ -541,11 +586,16 @@ function OrderQueueCard({
             type="button"
             onClick={onAdvance}
             disabled={loading}
-            className="inline-flex min-w-40 items-center justify-center gap-2 rounded-full bg-brand-600 px-4 py-2 text-sm font-bold text-white transition hover:bg-brand-700 disabled:bg-gray-300"
+            className="inline-flex min-w-44 items-center justify-center gap-2 rounded-full bg-brand-600 px-4 py-2 text-sm font-bold text-white transition hover:bg-brand-700 disabled:bg-gray-300"
           >
             {loading && <Loader2 className="h-4 w-4 animate-spin" />}
             {getAdvanceLabel(nextStatus)}
           </button>
+        )}
+        {status === 'Delivered' && (
+          <span className="inline-flex items-center rounded-full bg-brand-50 px-4 py-2 text-sm font-bold text-brand-700">
+            Completed
+          </span>
         )}
       </div>
     </article>

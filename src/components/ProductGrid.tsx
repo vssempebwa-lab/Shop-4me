@@ -128,8 +128,10 @@ export function HeroSection({
 
 export function CategoryHighlights({
   siteSettings = DEFAULT_SITE_SETTINGS,
+  onSelectCategory,
 }: {
   siteSettings?: SiteSettings;
+  onSelectCategory?: (category: Category) => void;
 }) {
   return (
     <section id="categories" className="mx-auto max-w-7xl px-4">
@@ -138,11 +140,15 @@ export function CategoryHighlights({
           const content = getCategoryContent(siteSettings, name);
           const imageUrl = content?.imageUrl;
           const hoverImageUrl = content?.hoverSwapEnabled ? content.hoverImageUrl : '';
+          const label = getCategoryDisplayLabel(siteSettings, name);
 
           return (
-            <div
+            <button
               key={name}
-              className="group rounded-2xl border border-gray-100 bg-white p-4 text-center shadow-sm transition hover:-translate-y-1 hover:border-brand-200 hover:shadow-md"
+              type="button"
+              onClick={() => onSelectCategory?.(name)}
+              aria-label={`Browse ${label}`}
+              className="group rounded-2xl border border-gray-100 bg-white p-4 text-center shadow-sm transition hover:-translate-y-1 hover:border-brand-200 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-brand-300 focus:ring-offset-2"
             >
               <div className="relative mx-auto grid h-12 w-12 place-items-center overflow-hidden rounded-2xl bg-brand-50 text-brand-600 transition group-hover:bg-brand-600 group-hover:text-white">
                 {imageUrl ? (
@@ -164,11 +170,9 @@ export function CategoryHighlights({
                   <Icon className="h-6 w-6" />
                 )}
               </div>
-              <p className="mt-3 text-sm font-bold text-gray-800">
-                {getCategoryDisplayLabel(siteSettings, name)}
-              </p>
+              <p className="mt-3 text-sm font-bold text-gray-800">{label}</p>
               <p className="mt-0.5 text-[11px] text-gray-500">{content?.blurb || blurb}</p>
-            </div>
+            </button>
           );
         })}
       </div>

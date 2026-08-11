@@ -29,9 +29,8 @@ export default function AttendantProfileCard({
       <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3">
         <p className="text-sm font-extrabold text-amber-800">This outlet is temporarily unattended</p>
         <p className="mt-1 text-xs font-medium text-amber-700">
-          {attendantError
-            ? 'We could not load an attendant profile, but you can still continue checkout.'
-            : 'You can still review your order and continue checkout.'}
+          You can still review your order and continue checkout. An attendant will be assigned at the
+          selected market outlet.
         </p>
       </div>
     );

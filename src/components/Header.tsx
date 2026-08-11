@@ -19,6 +19,42 @@ import { useCart } from '../context/CartContext';
 import type { SiteSettings } from '../lib/siteSettings';
 import shopForMeLogo from '../../Admin-Pics/shop for me logo free.png';
 
+function GoogleMark({ className = 'h-3.5 w-3.5' }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" aria-hidden="true">
+      <path
+        d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"
+        fill="#4285F4"
+      />
+      <path
+        d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+        fill="#34A853"
+      />
+      <path
+        d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"
+        fill="#FBBC05"
+      />
+      <path
+        d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
+        fill="#EA4335"
+      />
+    </svg>
+  );
+}
+
+function getAuthAvatarUrl(user: User) {
+  const meta = user.user_metadata ?? {};
+  const candidate = meta.avatar_url || meta.picture;
+  return typeof candidate === 'string' && candidate.trim() ? candidate.trim() : null;
+}
+
+function getAuthDisplayName(user: User) {
+  const meta = user.user_metadata ?? {};
+  const candidate = meta.full_name || meta.name || meta.preferred_username;
+  if (typeof candidate === 'string' && candidate.trim()) return candidate.trim();
+  return user.email ?? 'Customer';
+}
+
 interface HeaderProps {
   search: string;
   onSearchChange: (v: string) => void;
@@ -61,6 +97,8 @@ export default function Header({
   const [showPassword, setShowPassword] = useState(false);
   const accountRef = useRef<HTMLDivElement>(null);
   const helpRef = useRef<HTMLDivElement>(null);
+  const authAvatarUrl = user ? getAuthAvatarUrl(user) : null;
+  const authDisplayName = user ? getAuthDisplayName(user) : null;
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 40);
@@ -168,10 +206,30 @@ export default function Header({
                 <button
                   onClick={() => setAccountOpen((v) => !v)}
                   data-nav-action
-                  className="flex items-center gap-1.5 rounded-full px-3 py-2 text-sm font-medium text-white/85 transition hover:bg-white/10 hover:text-white"
+                  className="flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-sm font-medium text-white/85 transition hover:bg-white/10 hover:text-white sm:px-3 sm:py-2"
+                  aria-label={user ? `Account menu for ${authDisplayName}` : 'Account menu'}
                 >
-                  <UserIcon className="h-5 w-5" />
-                  <span className="hidden md:inline">Account</span>
+                  {user ? (
+                    <span className="relative inline-flex shrink-0">
+                      {authAvatarUrl ? (
+                        <img
+                          src={authAvatarUrl}
+                          alt=""
+                          referrerPolicy="no-referrer"
+                          className="h-8 w-8 rounded-full object-cover ring-2 ring-white/40"
+                        />
+                      ) : (
+                        <span className="grid h-8 w-8 place-items-center rounded-full bg-white/15 text-xs font-bold text-white ring-2 ring-white/40">
+                          {(authDisplayName ?? 'U').slice(0, 1).toUpperCase()}
+                        </span>
+                      )}
+                    </span>
+                  ) : (
+                    <UserIcon className="h-5 w-5" />
+                  )}
+                  <span className="hidden max-w-[7.5rem] truncate md:inline">
+                    {user ? authDisplayName : 'Account'}
+                  </span>
                   <ChevronDown className={`hidden h-3.5 w-3.5 md:inline transition ${accountOpen ? 'rotate-180' : ''}`} />
                 </button>
                 {accountOpen && (
@@ -179,15 +237,38 @@ export default function Header({
                     <div className="px-3 py-2">
                       <p className="text-sm font-semibold text-gray-800">Account</p>
                       <p className="text-xs text-gray-500">
-                        Sign in with Google or email/password to place and track orders.
+                        {user
+                          ? 'Manage your account and orders.'
+                          : 'Sign in with Google or email/password to place and track orders.'}
                       </p>
                     </div>
                     <div className="my-2 h-px bg-gray-100" />
                     {user ? (
                       <div className="space-y-2 p-1">
-                        <div className="rounded-xl bg-brand-50 px-3 py-2 text-sm font-medium text-brand-700">
-                          <p>Signed in as {user.email ?? 'Customer'}</p>
-                          <p className="text-xs text-gray-500">Role: {role ?? 'customer'}</p>
+                        <div className="flex items-center gap-3 rounded-xl bg-brand-50 px-3 py-2.5">
+                          <span className="relative inline-flex shrink-0">
+                            {authAvatarUrl ? (
+                              <img
+                                src={authAvatarUrl}
+                                alt=""
+                                referrerPolicy="no-referrer"
+                                className="h-11 w-11 rounded-full object-cover ring-2 ring-white"
+                              />
+                            ) : (
+                              <span className="grid h-11 w-11 place-items-center rounded-full bg-brand-100 text-sm font-bold text-brand-700 ring-2 ring-white">
+                                {(authDisplayName ?? 'U').slice(0, 1).toUpperCase()}
+                              </span>
+                            )}
+                          </span>
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-sm font-semibold text-brand-900">
+                              {authDisplayName}
+                            </p>
+                            <p className="truncate text-xs text-gray-500">{user.email}</p>
+                            <p className="mt-1 text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+                              {role ?? 'customer'}
+                            </p>
+                          </div>
                         </div>
                         {merchantRole && (
                           <button
@@ -229,12 +310,7 @@ export default function Header({
                           }}
                           className="flex w-full items-center justify-center gap-3 rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm font-medium text-gray-700 transition hover:bg-gray-50 hover:border-gray-300"
                         >
-                          <svg className="h-5 w-5" viewBox="0 0 24 24">
-                            <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4"/>
-                            <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
-                            <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
-                            <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
-                          </svg>
+                          <GoogleMark className="h-5 w-5" />
                           Sign in with Google
                         </button>
                         <div className="flex items-center gap-3 px-1">
