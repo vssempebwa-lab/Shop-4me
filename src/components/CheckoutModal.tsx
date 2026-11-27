@@ -249,6 +249,12 @@ export default function CheckoutModal({
 
     if (insertError) {
       setSubmitting(false);
+      // P0001 = a check raised by the order trigger (out of stock, removed
+      // product, bad quantity). Its message is written for customers.
+      if (insertError.code === 'P0001' && insertError.message) {
+        setError(insertError.message);
+        return;
+      }
       // The browser-only "local guest order" fallback is a dev convenience: in
       // production nothing reads it, so the customer would see a success screen
       // for an order no one ever receives. Surface the failure instead.
