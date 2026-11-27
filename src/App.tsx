@@ -11,6 +11,7 @@ import AttendantWorkspace from './components/AttendantWorkspace';
 import MyOrdersModal from './components/MyOrdersModal';
 import TrackOrderModal from './components/TrackOrderModal';
 import ConsentBanner from './components/ConsentBanner';
+import MobileCartBar from './components/MobileCartBar';
 import LegalPage, { type LegalPageKind } from './components/LegalPage';
 import { DEMO_ORDER_PREFIX } from './lib/demoOrders';
 import { getOrderCode, type GuestOrderAccess } from './lib/orderTracking';
@@ -533,7 +534,7 @@ function App() {
             ) : (
               <>
                 <HeroSection siteSettings={siteSettings} />
-                <div className="mx-auto max-w-7xl space-y-8 px-4 py-8">
+                <div className="mx-auto max-w-7xl space-y-8 px-4 py-6 sm:py-8">
                   <CategoryHighlights
                     siteSettings={siteSettings}
                     onSelectCategory={(category) => {
@@ -543,25 +544,15 @@ function App() {
                       window.scrollTo({ top: 0, behavior: 'smooth' });
                     }}
                   />
-                  <div id="catalog" className="space-y-4">
-                    <div className="flex flex-wrap items-end justify-between gap-2">
-                      <div>
-                        <h2 className="text-2xl font-extrabold text-brand-800">
-                          {activeCategory === 'All'
-                            ? 'All Products'
-                            : getCategoryDisplayLabel(siteSettings, activeCategory)}
-                        </h2>
-                        <p className="text-sm text-gray-500">
-                          Fresh items priced in Ugandan Shilling, delivered to your door.
-                        </p>
-                      </div>
+                  <div id="catalog" className="scroll-mt-24 space-y-4">
+                    <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+                      <h2 className="text-xl font-bold text-gray-900 sm:text-2xl">
+                        {search.trim() ? `Results for "${search.trim()}"` : 'All products'}
+                      </h2>
+                      <p className="text-xs text-gray-500">
+                        Prices are today's market estimates. You approve the final bill.
+                      </p>
                     </div>
-                    <CategoryBar
-                      active={activeCategory}
-                      onSelect={setActiveCategory}
-                      counts={counts}
-                      siteSettings={siteSettings}
-                    />
                     {dbError && (
                       <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
                         {hasSupabaseConfig
@@ -571,7 +562,7 @@ function App() {
                     )}
                     <ProductGrid
                       products={products}
-                      activeCategory={activeCategory}
+                      activeCategory="All"
                       search={search}
                       loading={loading}
                       siteSettings={siteSettings}
@@ -586,6 +577,9 @@ function App() {
         <Footer
           siteSettings={siteSettings}
         />
+        {!attendantMode && !(merchantMode && merchantRole) && !cartOpen && !checkoutOpen && (
+          <MobileCartBar onOpen={() => setCartOpen(true)} />
+        )}
         <ConsentBanner />
 
         <CartDrawer

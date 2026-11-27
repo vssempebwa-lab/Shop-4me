@@ -74,7 +74,7 @@ export default function TrackOrderModal({ onClose, onFound }: TrackOrderModalPro
             placeholder="#3F9A12BC"
             autoCapitalize="characters"
             autoComplete="off"
-            className="w-full rounded-xl border border-gray-200 px-3 py-2.5 font-mono text-sm uppercase tracking-wider outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-100"
+            className="w-full rounded-xl border border-gray-200 px-3 py-2.5 font-mono text-base uppercase sm:text-sm tracking-wider outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-100"
           />
         </label>
         <label className="mt-3 block">
@@ -86,7 +86,7 @@ export default function TrackOrderModal({ onClose, onFound }: TrackOrderModalPro
             inputMode="tel"
             autoComplete="tel"
             placeholder="0772 123 456"
-            className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-100"
+            className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-base outline-none sm:text-sm focus:border-brand-400 focus:ring-2 focus:ring-brand-100"
           />
         </label>
 

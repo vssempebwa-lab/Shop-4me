@@ -8,7 +8,6 @@ import { DEMO_ORDER_PREFIX, updateSharedDemoOrder } from '../lib/demoOrders';
 import { getStatusDisplay } from '../lib/orderStatus';
 import {
   findOutletByCode,
-  formatOutletOption,
   formatDistributionAreas,
   OFFICIAL_OUTLETS,
   suggestOutletFromText,
@@ -345,20 +344,6 @@ export default function CheckoutModal({
             </div>
           </div>
 
-          {selectedOutlet && (
-            <section className="mt-4">
-              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
-                Active Attendant
-              </p>
-              <AttendantProfileCard
-                attendant={selectedAttendant}
-                attendantError={attendantError}
-                loading={attendantLoading}
-                outlet={selectedOutlet}
-              />
-            </section>
-          )}
-
           {/* Contact details */}
           <p className="mt-5 text-xs font-semibold uppercase tracking-wide text-gray-500">
             Contact Details
@@ -370,6 +355,7 @@ export default function CheckoutModal({
               value={name}
               onChange={setName}
               placeholder="e.g. John Mukasa"
+              autoComplete="name"
             />
             <Field
               icon={<Phone className="h-4 w-4" />}
@@ -378,6 +364,8 @@ export default function CheckoutModal({
               onChange={setPhone}
               placeholder="e.g. 0772 123 456"
               type="tel"
+              autoComplete="tel"
+              inputMode="tel"
             />
           </div>
 
@@ -417,12 +405,15 @@ export default function CheckoutModal({
                     </option>
                   ))}
                 </select>
-                {selectedOutlet && (
-                  <span className="mt-1.5 block text-xs font-medium text-gray-500">
-                    Your order will be prepared at this outlet.
-                  </span>
-                )}
               </label>
+              {selectedOutlet && (
+                <AttendantProfileCard
+                  attendant={selectedAttendant}
+                  attendantError={attendantError}
+                  loading={attendantLoading}
+                  outlet={selectedOutlet}
+                />
+              )}
               {outletMismatch && (
                 <p className="rounded-xl bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700">
                   This is outside your area's usual outlet - pickup may take slightly longer.
@@ -437,25 +428,11 @@ export default function CheckoutModal({
                 textarea
               />
               {selectedOutlet && (
-                <div className="rounded-xl bg-brand-50 px-3 py-2.5 text-sm">
-                  <p className="font-bold text-brand-800">
-                    Your order will be handled by {selectedOutlet.hub_market || selectedOutlet.name}.
-                  </p>
-                  <p className="mt-1 text-xs font-medium text-brand-700">
-                    {formatOutletOption(selectedOutlet)}
-                  </p>
-                  <p className="mt-1 text-xs text-brand-700">
-                    Covers: {formatDistributionAreas(selectedOutlet)}
-                  </p>
-                </div>
+                <p className="text-xs text-gray-500">
+                  {selectedOutlet.hub_market || selectedOutlet.name} covers {formatDistributionAreas(selectedOutlet)}.
+                  Flat {formatUGX(DELIVERY_FEE)} delivery, usually the same day.
+                </p>
               )}
-              <div className="flex items-center justify-between rounded-xl bg-gray-50 px-3 py-2.5 text-sm">
-                <span className="font-semibold text-gray-700">Delivery Fee</span>
-                <span className="font-extrabold text-brand-700">{formatUGX(DELIVERY_FEE)}</span>
-              </div>
-              <p className="text-xs font-medium text-gray-500">
-                Flat rate, all areas. Estimated dispatch: same day, based on outlet availability.
-              </p>
             </div>
           </section>
 
@@ -533,6 +510,8 @@ function Field({
   placeholder,
   type = 'text',
   textarea = false,
+  autoComplete,
+  inputMode,
 }: {
   icon: React.ReactNode;
   label: string;
@@ -541,6 +520,8 @@ function Field({
   placeholder?: string;
   type?: string;
   textarea?: boolean;
+  autoComplete?: string;
+  inputMode?: React.HTMLAttributes<HTMLInputElement>['inputMode'];
 }) {
   return (
     <label className="block">
@@ -553,7 +534,7 @@ function Field({
             onChange={(e) => onChange(e.target.value)}
             placeholder={placeholder}
             rows={2}
-            className="w-full rounded-xl border border-gray-200 bg-gray-50 py-2.5 pl-10 pr-3 text-sm outline-none transition focus:border-brand-400 focus:bg-white focus:ring-2 focus:ring-brand-100"
+            className="w-full rounded-xl border border-gray-200 bg-gray-50 py-2.5 pl-10 pr-3 text-base outline-none transition focus:border-brand-400 focus:bg-white focus:ring-2 focus:ring-brand-100 sm:text-sm"
           />
         ) : (
           <input
@@ -561,7 +542,9 @@ function Field({
             value={value}
             onChange={(e) => onChange(e.target.value)}
             placeholder={placeholder}
-            className="w-full rounded-xl border border-gray-200 bg-gray-50 py-2.5 pl-10 pr-3 text-sm outline-none transition focus:border-brand-400 focus:bg-white focus:ring-2 focus:ring-brand-100"
+            autoComplete={autoComplete}
+            inputMode={inputMode}
+            className="h-11 w-full rounded-xl border border-gray-200 bg-gray-50 pl-10 pr-3 text-base outline-none transition focus:border-brand-400 focus:bg-white focus:ring-2 focus:ring-brand-100 sm:text-sm"
           />
         )}
       </div>

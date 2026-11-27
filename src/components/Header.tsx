@@ -122,16 +122,17 @@ export default function Header({
   }, []);
 
   return (
-    <header className="sticky top-0 z-40">
-      {/* Top announcement banner */}
-      <div className="bg-brand-800 text-brand-50 text-xs sm:text-sm">
-        <div className="mx-auto max-w-7xl px-4 py-2 flex items-center gap-2">
-          <Truck className="h-4 w-4 shrink-0 text-brand-200" />
+    <>
+      {/* Announcement scrolls away; only the main bar stays pinned. */}
+      <div className="bg-brand-800 text-xs text-brand-50">
+        <div className="mx-auto flex max-w-7xl items-center justify-center gap-2 px-4 py-1.5">
+          <Truck className="h-3.5 w-3.5 shrink-0 text-brand-200" />
           <p className="truncate" data-site-text="announcementText">
             {siteSettings.announcementText}
           </p>
         </div>
       </div>
+    <header className="sticky top-0 z-40">
 
       {/* Main header */}
       <div
@@ -141,29 +142,37 @@ export default function Header({
         style={{ backgroundColor: siteSettings.navigationBarColor }}
       >
         <div className="mx-auto max-w-7xl px-4">
-          <div className="flex items-center gap-3 py-3">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2 py-2.5 sm:flex-nowrap sm:py-3">
             {/* Logo */}
-            <a href="#" className="flex shrink-0 items-center">
+            <a href="/" className="flex shrink-0 items-center" aria-label="Shop For Me Uganda home">
               <img
                 src={shopForMeLogo}
                 alt="Shop For Me Uganda"
-                className="h-12 w-36 object-contain object-left sm:h-14 sm:w-44"
+                className="h-10 w-28 object-contain object-left sm:h-12 sm:w-36"
               />
             </a>
 
-            {/* Search */}
-            <div className="relative flex-1 max-w-xl">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+            {/* Search: own full-width row on phones */}
+            <div className="relative order-last w-full sm:order-none sm:max-w-xl sm:flex-1">
+              <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
               <input
+                type="search"
                 value={search}
-                onChange={(e) => onSearchChange(e.target.value)}
-                placeholder="Search products, brands and categories"
-                className="w-full rounded-full border border-white/20 bg-white py-2.5 pl-10 pr-4 text-sm text-gray-900 outline-none transition placeholder:text-gray-400 focus:border-brand-300 focus:ring-2 focus:ring-brand-300/30"
+                onChange={(e) => {
+                  onSearchChange(e.target.value);
+                  if (e.target.value && window.scrollY < 200) {
+                    document.getElementById('catalog')?.scrollIntoView({ behavior: 'smooth' });
+                  }
+                }}
+                placeholder="Search tomatoes, rice, charcoal…"
+                aria-label="Search products"
+                enterKeyHint="search"
+                className="h-11 w-full rounded-xl border-0 bg-white pl-10 pr-4 text-base text-gray-900 sm:text-sm outline-none ring-1 ring-white/20 transition placeholder:text-gray-400 focus:ring-2 focus:ring-brand-300"
               />
             </div>
 
             {/* Actions */}
-            <div className="flex items-center gap-1 sm:gap-2">
+            <div className="ml-auto flex items-center gap-1 sm:ml-0 sm:gap-2">
               {/* Help */}
               <div className="relative" ref={helpRef}>
                 <button
@@ -445,6 +454,7 @@ export default function Header({
         </div>
       </div>
     </header>
+    </>
   );
 }
 

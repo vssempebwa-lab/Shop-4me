@@ -25,11 +25,11 @@ export default function AttendantProfileCard({
 
   if (!attendant) {
     return (
-      <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3">
-        <p className="text-sm font-extrabold text-amber-800">This outlet is temporarily unattended</p>
-        <p className="mt-1 text-xs font-medium text-amber-700">
-          You can still review your order and continue checkout. An attendant will be assigned at the
-          selected market outlet.
+      <div className="rounded-2xl bg-gray-50 p-3">
+        <p className="text-sm font-semibold text-gray-800">Your attendant will be assigned</p>
+        <p className="mt-0.5 text-xs text-gray-500">
+          The next available attendant at {outlet.hub_market || outlet.name} will shop for you and call if anything
+          changes.
         </p>
       </div>
     );
