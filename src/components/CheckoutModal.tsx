@@ -248,7 +248,17 @@ export default function CheckoutModal({
 
     if (insertError) {
       setSubmitting(false);
-      saveLocalGuestOrder(insertError);
+      // The browser-only "local guest order" fallback is a dev convenience: in
+      // production nothing reads it, so the customer would see a success screen
+      // for an order no one ever receives. Surface the failure instead.
+      if (import.meta.env.DEV) {
+        saveLocalGuestOrder(insertError);
+        return;
+      }
+      console.error('Supabase checkout insert failed.', insertError);
+      setError(
+        'We could not place your order right now. Please check your connection and try again. Your cart has been kept.',
+      );
       return;
     }
 

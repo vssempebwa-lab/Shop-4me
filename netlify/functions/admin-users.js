@@ -2,7 +2,11 @@ import { createClient } from '@supabase/supabase-js';
 
 const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-const allowFreeAdminAccess = process.env.SFM_ALLOW_FREE_ADMIN_ACCESS === 'true';
+// The free-access header bypasses auth entirely, so it is honoured only under
+// `netlify dev` (which sets NETLIFY_DEV=true) and never on a deployed site,
+// even if SFM_ALLOW_FREE_ADMIN_ACCESS is accidentally set there.
+const allowFreeAdminAccess =
+  process.env.SFM_ALLOW_FREE_ADMIN_ACCESS === 'true' && process.env.NETLIFY_DEV === 'true';
 const freeAdminHeader = 'local-free-access';
 const officialOutletCodes = new Set([
   'DEPOT-KAW-01',
@@ -259,6 +263,18 @@ async function resetPassword(event, supabaseAdmin, actorId) {
   if (!userId) return json(400, { message: 'Missing userId.' });
   if (!password || password.length < 8) {
     return json(400, { message: 'Password must be at least 8 characters.' });
+  }
+
+  // Only staff accounts managed from this screen may be reset here; never
+  // arbitrary customers or users without a role row.
+  const { data: targetRole, error: targetError } = await supabaseAdmin
+    .from('user_roles')
+    .select('role')
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (targetError || !targetRole || !['admin', 'attendant', 'merchant'].includes(targetRole.role)) {
+    return json(404, { message: 'Staff account not found.' });
   }
 
   const { error } = await supabaseAdmin.auth.admin.updateUserById(userId, { password });

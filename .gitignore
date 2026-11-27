@@ -28,3 +28,6 @@ client_secret*.json
 
 # Local free-access shared demo orders (synced across admin/attendant ports)
 data/local-demo-orders.json
+
+# Local free-access staff accounts (contains personal data, never commit)
+data/local-admin-users.json

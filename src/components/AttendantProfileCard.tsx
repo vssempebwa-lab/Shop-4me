@@ -11,7 +11,6 @@ interface AttendantProfileCardProps {
 
 export default function AttendantProfileCard({
   attendant,
-  attendantError = null,
   loading = false,
   outlet,
 }: AttendantProfileCardProps) {

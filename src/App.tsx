@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import Header, { MerchantToggle } from './components/Header';
+import Header from './components/Header';
 import Footer from './components/Footer';
 import CategoryBar from './components/CategoryBar';
 import ProductGrid, { HeroSection, CategoryHighlights } from './components/ProductGrid';
@@ -27,24 +27,33 @@ type LocalWorkspaceRole = 'admin' | 'attendant';
 const ATTENDANT_LOCAL_PORT = '5174';
 const ADMIN_LOCAL_PORT = '5176';
 const LOCAL_WORKSPACE_SESSION_KEY = 'sfm-local-workspace-session';
+// Free-access local workspaces exist only in `vite dev`. In production builds
+// `import.meta.env.DEV` is false, so these credentials are stripped from the
+// bundle and every staff route goes through real Supabase auth + RLS.
+const LOCAL_FREE_ACCESS_ENABLED = import.meta.env.DEV;
 const LOCAL_WORKSPACE_CREDENTIALS: Record<
   LocalWorkspaceRole,
   { label: string; login: string; password: string }
-> = {
-  admin: {
-    label: 'Super Admin & Management',
-    login: 'admin@shop4me.local',
-    password: 'admin12345',
-  },
-  attendant: {
-    label: 'Local Market Attendant',
-    login: 'attendant@shop4me.local',
-    password: 'attendant12345',
-  },
-};
+> = LOCAL_FREE_ACCESS_ENABLED
+  ? {
+      admin: {
+        label: 'Super Admin & Management',
+        login: 'admin@shop4me.local',
+        password: 'admin12345',
+      },
+      attendant: {
+        label: 'Local Market Attendant',
+        login: 'attendant@shop4me.local',
+        password: 'attendant12345',
+      },
+    }
+  : {
+      admin: { label: 'Super Admin & Management', login: '', password: '' },
+      attendant: { label: 'Local Market Attendant', login: '', password: '' },
+    };
 
 function getLocalWorkspace(): LocalWorkspace {
-  if (typeof window === 'undefined') return 'client';
+  if (typeof window === 'undefined' || !LOCAL_FREE_ACCESS_ENABLED) return 'client';
   if (
     window.location.port === ADMIN_LOCAL_PORT ||
     window.location.pathname.startsWith('/merchant') ||
@@ -255,7 +264,10 @@ function App() {
   }, [products]);
 
   const signInToLocalWorkspace = (emailOrPhone: string, password: string) => {
-    if (localWorkspace !== 'admin' && localWorkspace !== 'attendant') {
+    if (
+      !LOCAL_FREE_ACCESS_ENABLED ||
+      (localWorkspace !== 'admin' && localWorkspace !== 'attendant')
+    ) {
       return false;
     }
 
@@ -534,26 +546,6 @@ function App() {
         <Footer
           siteSettings={siteSettings}
         />
-
-        {/* Floating merchant toggle (mobile-friendly, always reachable) */}
-        {false && (
-          <div className="fixed bottom-4 right-4 z-30 sm:hidden">
-            <MerchantToggle
-              merchantMode={merchantMode}
-              onToggle={() => {
-                if (!merchantRole) {
-                  setMerchantMode(false);
-                  return;
-                }
-                if (merchantMode) {
-                  navigateToStorefront();
-                } else {
-                  navigateToMerchantDashboard();
-                }
-              }}
-            />
-          </div>
-        )}
 
         <CartDrawer
           open={cartOpen}
