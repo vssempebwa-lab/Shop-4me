@@ -21,3 +21,13 @@ dist-ssr
 *.sln
 *.sw?
 .env
+
+# Google OAuth credentials (never commit)
+client_secret*.json
+.secrets/
+
+# Local free-access shared demo orders (synced across admin/attendant ports)
+data/local-demo-orders.json
+
+# Local free-access staff accounts (contains personal data, never commit)
+data/local-admin-users.json

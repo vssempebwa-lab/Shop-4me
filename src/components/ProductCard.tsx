@@ -3,12 +3,21 @@ import { Plus, Minus, Check, PackageSearch } from 'lucide-react';
 import type { Product } from '../types';
 import { useCart } from '../context/CartContext';
 import { formatUGX } from '../lib/format';
+import {
+  DEFAULT_SITE_SETTINGS,
+  getCategoryDisplayLabel,
+  type SiteSettings,
+} from '../lib/siteSettings';
 
 interface ProductCardProps {
   product: Product;
+  siteSettings?: SiteSettings;
 }
 
-export default function ProductCard({ product }: ProductCardProps) {
+export default function ProductCard({
+  product,
+  siteSettings = DEFAULT_SITE_SETTINGS,
+}: ProductCardProps) {
   const { quantityOf, add, increment, decrement } = useCart();
   const [imgError, setImgError] = useState(false);
   const qty = quantityOf(product.id);
@@ -31,7 +40,7 @@ export default function ProductCard({ product }: ProductCardProps) {
           />
         )}
         <span className="absolute left-3 top-3 rounded-full bg-white/90 px-2.5 py-1 text-[11px] font-semibold text-brand-700 shadow-sm backdrop-blur">
-          {product.category}
+          {getCategoryDisplayLabel(siteSettings, product.category)}
         </span>
         {!product.in_stock && (
           <div className="absolute inset-0 grid place-items-center bg-white/70 backdrop-blur-sm">

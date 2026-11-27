@@ -1,40 +1,45 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { X, MapPin, User, Phone, CheckCircle2, Truck, Loader2, WalletCards } from 'lucide-react';
+import { X, MapPin, User, Phone, CheckCircle2, Truck, Loader2, WalletCards, Download } from 'lucide-react';
 import { useCart } from '../context/CartContext';
 import { formatUGX } from '../lib/format';
 import { supabase } from '../lib/supabase';
-import type { Depot, Order } from '../types';
-import { DEMO_ORDER_PREFIX, updateDemoOrder } from '../lib/demoOrders';
+import type { Outlet, Order, OrderItem, UserRoleProfile } from '../types';
+import { DEMO_ORDER_PREFIX, updateSharedDemoOrder } from '../lib/demoOrders';
 import { getStatusDisplay } from '../lib/orderStatus';
 import {
-  findDepotByCode,
-  formatDepotOption,
+  findOutletByCode,
+  formatOutletOption,
   formatDistributionAreas,
-  OFFICIAL_DEPOTS,
-  suggestDepotFromText,
-} from '../lib/depots';
+  OFFICIAL_OUTLETS,
+  suggestOutletFromText,
+} from '../lib/outlets';
+import { fetchPublicAttendantForOutlet } from '../lib/attendants';
+import { generateShopListPDF, preloadShopListPdfGenerator } from '../lib/shopListPdf';
+import { DEFAULT_PAYMENT_SETTINGS, fetchPaymentSettings, type PaymentSettings } from '../lib/paymentSettings';
+import AttendantProfileCard from './AttendantProfileCard';
+import FinalBillPanel from './FinalBillPanel';
 
 interface CheckoutModalProps {
   open: boolean;
   onClose: () => void;
   onOrderPlaced: (order: Order) => void;
+  initialSelectedOutletCode?: string;
+  initialOutlet?: Outlet | null;
+  initialAttendant?: UserRoleProfile | null;
+  onSelectedOutletCodeChange?: (outletCode: string) => void;
   userId?: string | null;
 }
 
-const PAYMENT_OPTIONS = [
-  {
-    label: 'MTN MoMoPay',
-    till: 'Merchant Till: 700000',
-    value: 'MTN MoMoPay - Till 700000',
-  },
-  {
-    label: 'Airtel Money Merchant',
-    till: 'Merchant Till: 700001',
-    value: 'Airtel Money Merchant - Till 700001',
-  },
-];
-
-export default function CheckoutModal({ open, onClose, onOrderPlaced, userId }: CheckoutModalProps) {
+export default function CheckoutModal({
+  open,
+  onClose,
+  onOrderPlaced,
+  initialSelectedOutletCode,
+  initialOutlet,
+  initialAttendant,
+  onSelectedOutletCodeChange,
+  userId,
+}: CheckoutModalProps) {
   const { items, subtotal, clear } = useCart();
   const DELIVERY_FEE = 5000;
   const total = subtotal + DELIVERY_FEE;
@@ -42,56 +47,125 @@ export default function CheckoutModal({ open, onClose, onOrderPlaced, userId }: 
   const [phone, setPhone] = useState('');
   const [address, setAddress] = useState('');
   const [selectedArea, setSelectedArea] = useState('');
-  const [selectedDepotCode, setSelectedDepotCode] = useState('');
-  const [depots, setDepots] = useState<Depot[]>([]);
-  const [paymentMethod, setPaymentMethod] = useState('MTN MoMoPay - Till 700000');
+  const [selectedOutletCode, setSelectedOutletCode] = useState(initialSelectedOutletCode ?? '');
+  const [outlets, setOutlets] = useState<Outlet[]>([]);
+  const [paymentSettings, setPaymentSettings] = useState<PaymentSettings>(DEFAULT_PAYMENT_SETTINGS);
+  const [paymentMethod, setPaymentMethod] = useState(formatPaymentMethodValue('mtn', DEFAULT_PAYMENT_SETTINGS));
+  const [attendant, setAttendant] = useState<UserRoleProfile | null>(
+    initialAttendant?.assigned_outlet === initialSelectedOutletCode ? initialAttendant ?? null : null,
+  );
+  const [attendantLoading, setAttendantLoading] = useState(false);
+  const [attendantError, setAttendantError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const locationOptions = buildLocationOptions(depots);
+  const locationOptions = buildLocationOptions(outlets);
   const selectedLocation = locationOptions.find((option) => option.value === selectedArea);
-  const suggestedDepot = suggestDepotFromText(
-    depots,
+  const suggestedOutlet = suggestOutletFromText(
+    outlets,
     selectedLocation?.area,
     selectedLocation?.division,
     address,
   );
-  const selectedDepot = findDepotByCode(depots, selectedDepotCode);
-  const depotMismatch = Boolean(
+  const selectedOutlet =
+    findOutletByCode(outlets, selectedOutletCode) ??
+    (initialOutlet?.outlet_code === selectedOutletCode ? initialOutlet : null);
+  const selectedAttendant = attendant?.assigned_outlet === selectedOutletCode ? attendant : null;
+  const paymentOptions = buildCheckoutPaymentOptions(paymentSettings);
+  const outletMismatch = Boolean(
     selectedLocation &&
-      suggestedDepot?.depot_code &&
-      selectedDepotCode &&
-      suggestedDepot.depot_code !== selectedDepotCode,
+      suggestedOutlet?.outlet_code &&
+      selectedOutletCode &&
+      suggestedOutlet.outlet_code !== selectedOutletCode,
   );
 
   useEffect(() => {
     if (!open) return;
 
-    const loadDepots = async () => {
-      const { data, error: depotError } = await supabase
-        .from('depots')
+    if (initialSelectedOutletCode) {
+      setSelectedOutletCode(initialSelectedOutletCode);
+    }
+
+    const loadOutlets = async () => {
+      const { data, error: outletError } = await supabase
+        .from('outlets')
         .select('*')
         .eq('is_active', true)
-        .order('depot_code');
+        .order('outlet_code');
 
-      if (!depotError && data?.length) {
-        setDepots((data as Depot[]) ?? []);
+      if (!outletError && data?.length) {
+        setOutlets((data as Outlet[]) ?? []);
       } else {
-        setDepots(OFFICIAL_DEPOTS);
+        setOutlets(OFFICIAL_OUTLETS);
       }
     };
 
-    void loadDepots();
+    void loadOutlets();
+  }, [initialSelectedOutletCode, open]);
+
+  useEffect(() => {
+    if (!open) return;
+
+    void fetchPaymentSettings().then((nextSettings) => {
+      setPaymentSettings(nextSettings);
+      setPaymentMethod((current) => {
+        if (current.toLowerCase().includes('airtel')) return formatPaymentMethodValue('airtel', nextSettings);
+        return formatPaymentMethodValue('mtn', nextSettings);
+      });
+    });
   }, [open]);
+
+  useEffect(() => {
+    if (selectedOutletCode || !outlets[0]) return;
+    updateSelectedOutlet(outlets[0].outlet_code);
+  }, [outlets, selectedOutletCode]);
 
   useEffect(() => {
     const location = locationOptions.find((option) => option.value === selectedArea);
     if (!location) return;
 
-    const matchedDepot = findDepotByCode(depots, location.depotCode);
-    if (matchedDepot) setSelectedDepotCode(matchedDepot.depot_code);
-  }, [depots, selectedArea]);
+    const matchedOutlet = findOutletByCode(outlets, location.outletCode);
+    if (matchedOutlet) updateSelectedOutlet(matchedOutlet.outlet_code);
+  }, [outlets, selectedArea]);
+
+  useEffect(() => {
+    if (!selectedOutletCode) {
+      setAttendant(null);
+      setAttendantError(null);
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadAttendant = async () => {
+      const matchingInitialAttendant =
+        initialAttendant?.assigned_outlet === selectedOutletCode ? initialAttendant : null;
+
+      setAttendantLoading(true);
+      setAttendantError(null);
+      setAttendant(matchingInitialAttendant);
+
+      const { attendant: profile, error } = await fetchPublicAttendantForOutlet(selectedOutletCode);
+
+      if (cancelled) return;
+
+      setAttendant(profile ?? matchingInitialAttendant);
+      setAttendantError(error && !matchingInitialAttendant ? error : null);
+      setAttendantLoading(false);
+    };
+
+    void loadAttendant();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [initialAttendant, selectedOutletCode]);
 
   if (!open) return null;
+
+  function updateSelectedOutlet(outletCode: string) {
+    setSelectedOutletCode(outletCode);
+    onSelectedOutletCodeChange?.(outletCode);
+  }
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -104,8 +178,8 @@ export default function CheckoutModal({ open, onClose, onOrderPlaced, userId }: 
       setError('Choose an area or type your pickup landmark.');
       return;
     }
-    if (!selectedDepotCode) {
-      setError('Please select your pickup depot.');
+    if (!selectedOutletCode) {
+      setError('Please select your pickup outlet.');
       return;
     }
     setSubmitting(true);
@@ -126,16 +200,16 @@ export default function CheckoutModal({ open, onClose, onOrderPlaced, userId }: 
       phone: phone.trim(),
       delivery_address: address.trim() || selectedLocation?.area || 'Pickup station to confirm',
       market_location: selectedLocation?.area ?? address.trim() ?? null,
-      depot_code: selectedDepot?.depot_code ?? selectedDepotCode,
-      division: selectedDepot?.division ?? null,
-      suggested_depot_code: suggestedDepot?.depot_code ?? selectedDepot?.depot_code ?? null,
+      outlet_code: selectedOutlet?.outlet_code ?? selectedOutletCode,
+      division: selectedOutlet?.division ?? null,
+      suggested_outlet_code: suggestedOutlet?.outlet_code ?? selectedOutlet?.outlet_code ?? null,
       subtotal,
       delivery_fee: DELIVERY_FEE,
       total_amount: total,
       payment_method: paymentMethod,
       payment_status: 'PENDING',
       order_status: 'Order Received',
-      is_shared_with_depot: false,
+      is_shared_with_outlet: false,
       user_id: userId ?? null,
       items: orderItems,
       status: 'Order Received',
@@ -148,8 +222,8 @@ export default function CheckoutModal({ open, onClose, onOrderPlaced, userId }: 
       setPhone('');
       setAddress('');
       setSelectedArea('');
-      setSelectedDepotCode('');
-      setPaymentMethod('MTN MoMoPay - Till 700000');
+      setSelectedOutletCode('');
+      setPaymentMethod(formatPaymentMethodValue('mtn', paymentSettings));
     };
 
     const finishOrder = (order: Order) => {
@@ -165,7 +239,7 @@ export default function CheckoutModal({ open, onClose, onOrderPlaced, userId }: 
         user_id: null,
       };
 
-      updateDemoOrder(localOrder);
+      updateSharedDemoOrder(localOrder);
       finishOrder(localOrder);
     };
 
@@ -175,7 +249,23 @@ export default function CheckoutModal({ open, onClose, onOrderPlaced, userId }: 
 
     if (insertError) {
       setSubmitting(false);
-      saveLocalGuestOrder(insertError);
+      // P0001 = a check raised by the order trigger (out of stock, removed
+      // product, bad quantity). Its message is written for customers.
+      if (insertError.code === 'P0001' && insertError.message) {
+        setError(insertError.message);
+        return;
+      }
+      // The browser-only "local guest order" fallback is a dev convenience: in
+      // production nothing reads it, so the customer would see a success screen
+      // for an order no one ever receives. Surface the failure instead.
+      if (import.meta.env.DEV) {
+        saveLocalGuestOrder(insertError);
+        return;
+      }
+      console.error('Supabase checkout insert failed.', insertError);
+      setError(
+        'We could not place your order right now. Please check your connection and try again. Your cart has been kept.',
+      );
       return;
     }
 
@@ -236,7 +326,7 @@ export default function CheckoutModal({ open, onClose, onOrderPlaced, userId }: 
             </div>
             <div className="mt-3 space-y-2 border-t border-brand-200/60 pt-3">
               <div className="flex items-center justify-between">
-                <span className="text-sm font-semibold text-gray-700">Subtotal</span>
+                <span className="text-sm font-semibold text-gray-700">Estimated subtotal</span>
                 <span className="text-gray-800">{formatUGX(subtotal)}</span>
               </div>
               <div className="flex items-center justify-between">
@@ -244,11 +334,29 @@ export default function CheckoutModal({ open, onClose, onOrderPlaced, userId }: 
                 <span className="text-gray-800">{formatUGX(DELIVERY_FEE)}</span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-sm font-semibold text-gray-700">Total Amount Due</span>
+                <span className="text-sm font-semibold text-gray-700">Estimated total</span>
                 <span className="text-lg font-extrabold text-brand-700">{formatUGX(total)}</span>
               </div>
+              <p className="text-xs leading-relaxed text-gray-500">
+                Market prices change daily. Your attendant sends a final bill after shopping. If it is above
+                this estimate or anything is replaced, you approve it before delivery.
+              </p>
             </div>
           </div>
+
+          {selectedOutlet && (
+            <section className="mt-4">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                Active Attendant
+              </p>
+              <AttendantProfileCard
+                attendant={selectedAttendant}
+                attendantError={attendantError}
+                loading={attendantLoading}
+                outlet={selectedOutlet}
+              />
+            </section>
+          )}
 
           {/* Contact details */}
           <p className="mt-5 text-xs font-semibold uppercase tracking-wide text-gray-500">
@@ -283,7 +391,7 @@ export default function CheckoutModal({ open, onClose, onOrderPlaced, userId }: 
                 <select
                   value={selectedArea}
                   onChange={(event) => setSelectedArea(event.target.value)}
-                  className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm outline-none transition focus:border-brand-400 focus:bg-white focus:ring-2 focus:ring-brand-100"
+                  className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm outline-none transition focus:border-emerald-400 focus:bg-white focus:ring-2 focus:ring-emerald-100"
                 >
                   <option value="">Select your area</option>
                   {locationOptions.map((option) => (
@@ -294,24 +402,29 @@ export default function CheckoutModal({ open, onClose, onOrderPlaced, userId }: 
                 </select>
               </label>
               <label className="block">
-                <span className="mb-1 block text-xs font-semibold text-gray-600">Pickup Depot</span>
+                <span className="mb-1 block text-xs font-semibold text-gray-600">Choose Your Outlet</span>
                 <select
-                  value={selectedDepotCode}
-                  onChange={(event) => setSelectedDepotCode(event.target.value)}
-                  className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm outline-none transition focus:border-brand-400 focus:bg-white focus:ring-2 focus:ring-brand-100"
+                  value={selectedOutletCode}
+                  onChange={(event) => updateSelectedOutlet(event.target.value)}
                   required
+                  className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm outline-none transition focus:border-emerald-400 focus:bg-white focus:ring-2 focus:ring-emerald-100"
                 >
-                  <option value="">Select pickup depot</option>
-                  {depots.map((depot) => (
-                    <option key={depot.depot_code} value={depot.depot_code}>
-                      {depot.hub_market || depot.name} - {depot.division}
+                  <option value="">Select an outlet</option>
+                  {outlets.map((outlet) => (
+                    <option key={outlet.outlet_code} value={outlet.outlet_code}>
+                      {outlet.hub_market || outlet.name} - {outlet.division}
                     </option>
                   ))}
                 </select>
+                {selectedOutlet && (
+                  <span className="mt-1.5 block text-xs font-medium text-gray-500">
+                    Your order will be prepared at this outlet.
+                  </span>
+                )}
               </label>
-              {depotMismatch && (
+              {outletMismatch && (
                 <p className="rounded-xl bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700">
-                  This is outside your area's usual depot - pickup may take slightly longer.
+                  This is outside your area's usual outlet - pickup may take slightly longer.
                 </p>
               )}
               <Field
@@ -322,16 +435,16 @@ export default function CheckoutModal({ open, onClose, onOrderPlaced, userId }: 
                 placeholder="e.g. near Kalerwe stage"
                 textarea
               />
-              {selectedDepot && (
+              {selectedOutlet && (
                 <div className="rounded-xl bg-brand-50 px-3 py-2.5 text-sm">
                   <p className="font-bold text-brand-800">
-                    Your order will be handled by {selectedDepot.hub_market || selectedDepot.name}.
+                    Your order will be handled by {selectedOutlet.hub_market || selectedOutlet.name}.
                   </p>
                   <p className="mt-1 text-xs font-medium text-brand-700">
-                    {formatDepotOption(selectedDepot)}
+                    {formatOutletOption(selectedOutlet)}
                   </p>
                   <p className="mt-1 text-xs text-brand-700">
-                    Covers: {formatDistributionAreas(selectedDepot)}
+                    Covers: {formatDistributionAreas(selectedOutlet)}
                   </p>
                 </div>
               )}
@@ -340,7 +453,7 @@ export default function CheckoutModal({ open, onClose, onOrderPlaced, userId }: 
                 <span className="font-extrabold text-brand-700">{formatUGX(DELIVERY_FEE)}</span>
               </div>
               <p className="text-xs font-medium text-gray-500">
-                Flat rate, all areas. Estimated dispatch: same day, based on depot availability.
+                Flat rate, all areas. Estimated dispatch: same day, based on outlet availability.
               </p>
             </div>
           </section>
@@ -354,7 +467,7 @@ export default function CheckoutModal({ open, onClose, onOrderPlaced, userId }: 
               You'll pay via Mobile Money when your order arrives at your pickup station. No upfront payment required.
             </p>
             <div className="mt-3 grid gap-2 sm:grid-cols-2">
-              {PAYMENT_OPTIONS.map((option) => (
+              {paymentOptions.map((option) => (
                 <label
                   key={option.value}
                   className={`cursor-pointer rounded-2xl border p-3 transition ${
@@ -384,19 +497,21 @@ export default function CheckoutModal({ open, onClose, onOrderPlaced, userId }: 
             </p>
           )}
 
-          <button
-            type="submit"
-            disabled={submitting || items.length === 0 || !selectedDepotCode}
-            className="mt-5 flex w-full items-center justify-center gap-2 rounded-full bg-brand-600 py-3 text-sm font-bold text-white shadow-md transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:bg-gray-300"
-          >
-            {submitting ? (
-              <>
-                <Loader2 className="h-4 w-4 animate-spin" /> Placing order...
-              </>
-            ) : (
-              <>Place Order - {formatUGX(total)}</>
-            )}
-          </button>
+          <div className="mt-5">
+            <button
+              type="submit"
+              disabled={submitting || items.length === 0 || !selectedOutletCode}
+              className="flex min-h-12 w-full items-center justify-center gap-2 rounded-full bg-brand-600 px-4 py-3 text-sm font-bold text-white shadow-md transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:bg-gray-300"
+            >
+              {submitting ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" /> Placing order...
+                </>
+              ) : (
+                <>Place Order · est. {formatUGX(total)}</>
+              )}
+            </button>
+          </div>
         </form>
       </div>
     </div>
@@ -447,31 +562,155 @@ function Field({
   );
 }
 
-function buildLocationOptions(depots: Depot[]) {
-  return depots.flatMap((depot) =>
-    depot.distribution_areas.map((area) => ({
-      value: `${depot.depot_code}:${area}`,
+function buildLocationOptions(outlets: Outlet[]) {
+  return outlets.flatMap((outlet) =>
+    outlet.distribution_areas.map((area) => ({
+      value: `${outlet.outlet_code}:${area}`,
       area,
-      depotCode: depot.depot_code,
-      division: depot.division,
+      outletCode: outlet.outlet_code,
+      division: outlet.division,
     })),
   );
+}
+
+function buildCheckoutPaymentOptions(settings: PaymentSettings) {
+  return [
+    {
+      label: 'MTN MoMoPay',
+      till: `Merchant Till: ${settings.mtnTillNumber}`,
+      value: formatPaymentMethodValue('mtn', settings),
+    },
+    {
+      label: settings.airtelLabel,
+      till: `Merchant Till: ${settings.airtelTillNumber}`,
+      value: formatPaymentMethodValue('airtel', settings),
+    },
+  ];
+}
+
+function formatPaymentMethodValue(provider: 'mtn' | 'airtel', settings: PaymentSettings) {
+  return provider === 'mtn'
+    ? `MTN MoMoPay - Till ${settings.mtnTillNumber}`
+    : `${settings.airtelLabel} - Till ${settings.airtelTillNumber}`;
 }
 
 export function OrderConfirmation({
   order,
   onClose,
+  viewerUserId = null,
+  variant = 'placed',
 }: {
   order: Order;
   onClose: () => void;
+  /** Signed-in user's id; lets the owner approve or query the final bill. */
+  viewerUserId?: string | null;
+  /** 'placed' right after checkout, 'tracking' when reopened from My orders. */
+  variant?: 'placed' | 'tracking';
 }) {
   const [currentOrder, setCurrentOrder] = useState(order);
+  const [outlets, setOutlets] = useState<Outlet[]>(OFFICIAL_OUTLETS);
+  const [attendant, setAttendant] = useState<UserRoleProfile | null>(null);
+  const [downloading, setDownloading] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
   const statusDisplay = getStatusDisplay(currentOrder.order_status ?? currentOrder.status);
   const isDemoOrder = currentOrder.id.startsWith(DEMO_ORDER_PREFIX);
+  const selectedOutlet =
+    findOutletByCode(outlets, currentOrder.outlet_code ?? '') ??
+    (currentOrder.outlet_code
+      ? {
+          outlet_code: currentOrder.outlet_code,
+          name: currentOrder.outlet_code,
+          hub_market: currentOrder.outlet_code,
+          division: currentOrder.division || 'Division to confirm',
+          distribution_areas: [],
+          is_active: true,
+        }
+      : null);
+  const attendantName = attendant?.full_name || 'Not assigned yet';
+  const attendantPhone = attendant?.phone_number?.trim() || 'Not available';
 
   useEffect(() => {
     setCurrentOrder(order);
   }, [order]);
+
+  useEffect(() => {
+    void preloadShopListPdfGenerator();
+  }, []);
+
+  useEffect(() => {
+    if (isDemoOrder) return;
+
+    let cancelled = false;
+
+    const loadSavedOrder = async () => {
+      const [{ data: orderRow, error: orderError }, { data: itemRows, error: itemError }] = await Promise.all([
+        supabase
+          .from('orders')
+          .select('*')
+          .eq('id', order.id)
+          .maybeSingle(),
+        supabase
+          .from('order_items')
+          .select('id,order_id,product_id,name,price,unit,quantity,created_at')
+          .eq('order_id', order.id)
+          .order('created_at', { ascending: true }),
+      ]);
+
+      if (cancelled) return;
+
+      if (orderError || itemError || !orderRow) {
+        console.error('Unable to refresh saved order for PDF download.', orderError ?? itemError);
+        return;
+      }
+
+      setCurrentOrder({
+        ...(orderRow as Order),
+        items: itemRows?.length ? (itemRows as OrderItem[]) : order.items,
+      });
+    };
+
+    void loadSavedOrder();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isDemoOrder, order]);
+
+  useEffect(() => {
+    const loadOutlets = async () => {
+      const { data, error: outletError } = await supabase
+        .from('outlets')
+        .select('*')
+        .eq('is_active', true)
+        .order('outlet_code');
+
+      setOutlets(!outletError && data?.length ? (data as Outlet[]) : OFFICIAL_OUTLETS);
+    };
+
+    void loadOutlets();
+  }, []);
+
+  useEffect(() => {
+    if (!currentOrder.outlet_code) {
+      setAttendant(null);
+      return;
+    }
+
+    const outletCode = currentOrder.outlet_code;
+    let cancelled = false;
+
+    const loadAttendant = async () => {
+      const { attendant: profile } = await fetchPublicAttendantForOutlet(outletCode);
+
+      if (!cancelled) setAttendant(profile);
+    };
+
+    void loadAttendant();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentOrder.outlet_code]);
 
   useEffect(() => {
     if (isDemoOrder) return;
@@ -501,17 +740,64 @@ export function OrderConfirmation({
     };
   }, [isDemoOrder, order.id]);
 
+  useEffect(() => {
+    if (!toast) return;
+    const timer = window.setTimeout(() => setToast(null), 2800);
+    return () => window.clearTimeout(timer);
+  }, [toast]);
+
+  const handleDownloadShopList = async () => {
+    setDownloading(true);
+    try {
+      await generateShopListPDF({
+        orderId: currentOrder.id,
+        generatedAt: currentOrder.created_at,
+        contactName: currentOrder.contact_name,
+        contactPhone: currentOrder.phone,
+        pickupLocation: currentOrder.market_location || currentOrder.delivery_address,
+        outlet: selectedOutlet,
+        attendant,
+        items: currentOrder.items.map((item) => ({
+          name: item.name,
+          quantity: item.quantity,
+          unit: item.unit,
+          price: item.price,
+        })),
+        subtotal: currentOrder.subtotal,
+        deliveryFee: currentOrder.delivery_fee ?? 0,
+        totalAmount:
+          currentOrder.total_amount ?? (currentOrder.subtotal ?? 0) + (currentOrder.delivery_fee ?? 0),
+        paymentMethod: currentOrder.payment_method,
+      });
+      setToast('Your shop list has been downloaded');
+    } catch (downloadError) {
+      console.error('Shop list PDF download failed', downloadError);
+      setToast('Unable to download the shop list right now');
+    } finally {
+      setDownloading(false);
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
-      <div className="relative w-full max-w-md overflow-hidden rounded-3xl bg-white shadow-2xl animate-scale-in">
+      <div className="relative max-h-[92vh] w-full max-w-md overflow-y-auto rounded-3xl bg-white shadow-2xl animate-scale-in">
+        {toast && (
+          <div className="absolute right-5 top-5 z-10 rounded-xl bg-gray-900 px-4 py-2 text-xs font-semibold text-white shadow-lg">
+            {toast}
+          </div>
+        )}
         <div className="bg-gradient-to-br from-brand-600 to-brand-800 px-6 py-8 text-center text-white">
           <div className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-white/20 ring-4 ring-white/30">
-            <CheckCircle2 className="h-9 w-9 text-gold-300" />
+            <CheckCircle2 className="h-9 w-9 text-brand-200" />
           </div>
-          <h2 className="mt-4 text-xl font-extrabold">Order Received!</h2>
+          <h2 className="mt-4 text-xl font-extrabold">
+            {variant === 'tracking' ? `Order #${currentOrder.id.slice(0, 8).toUpperCase()}` : 'Order Received!'}
+          </h2>
           <p className="mt-1 text-sm text-brand-50/90">
-            Thank you, {currentOrder.contact_name}. A depot team will process your order.
+            {variant === 'tracking'
+              ? `Placed ${new Date(currentOrder.created_at).toLocaleString()}`
+              : `Thank you, ${currentOrder.contact_name}. An outlet team will process your order.`}
           </p>
         </div>
         <div className="px-6 py-5">
@@ -538,10 +824,13 @@ export function OrderConfirmation({
             <Row label="Contact" value={currentOrder.contact_name} />
             <Row label="Phone" value={currentOrder.phone} />
             <Row label="Delivery to" value={currentOrder.delivery_address} />
+            <Row label="Outlet" value={selectedOutlet ? selectedOutlet.hub_market || selectedOutlet.name : currentOrder.outlet_code || 'To confirm'} />
+            <Row label="Attendant" value={attendantName} />
+            <Row label="Attendant Phone" value={attendantPhone} />
             <Row label="Payment" value={currentOrder.payment_method || 'Pay on Delivery'} />
             <Row label="Items" value={`${currentOrder.items.length} item(s)`} />
             <div className="flex items-center justify-between border-t border-gray-100 pt-2">
-              <span className="text-sm text-gray-500">Subtotal</span>
+              <span className="text-sm text-gray-500">Estimated subtotal</span>
               <span className="text-gray-800">{formatUGX(currentOrder.subtotal)}</span>
             </div>
             <div className="flex items-center justify-between">
@@ -549,17 +838,32 @@ export function OrderConfirmation({
               <span className="text-gray-800">{formatUGX(currentOrder.delivery_fee ?? 0)}</span>
             </div>
             <div className="flex items-center justify-between">
-              <span className="font-semibold text-gray-700">Total</span>
+              <span className="font-semibold text-gray-700">Estimated total</span>
               <span className="text-lg font-extrabold text-brand-700">
                 {formatUGX(currentOrder.total_amount ?? (currentOrder.subtotal ?? 0) + (currentOrder.delivery_fee ?? 0))}
               </span>
             </div>
           </div>
+
+          <FinalBillPanel
+            order={currentOrder}
+            canRespond={Boolean(viewerUserId && currentOrder.user_id === viewerUserId)}
+            onOrderUpdated={setCurrentOrder}
+          />
+
+          <button
+            onClick={handleDownloadShopList}
+            disabled={downloading}
+            className="mt-5 flex w-full items-center justify-center gap-2 rounded-full border border-brand-200 bg-white py-3 text-sm font-bold text-brand-700 transition hover:bg-brand-50 disabled:cursor-not-allowed disabled:border-gray-200 disabled:text-gray-400"
+          >
+            {downloading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+            Download Your Shop List
+          </button>
           <button
             onClick={onClose}
-            className="mt-5 w-full rounded-full bg-brand-600 py-3 text-sm font-bold text-white transition hover:bg-brand-700"
+            className="mt-3 w-full rounded-full bg-brand-600 py-3 text-sm font-bold text-white transition hover:bg-brand-700"
           >
-            Continue Shopping
+            {variant === 'tracking' ? 'Close' : 'Continue Shopping'}
           </button>
         </div>
       </div>

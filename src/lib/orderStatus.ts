@@ -46,7 +46,7 @@ export function normalizeOrderStatus(value?: string | null): OrderStatus {
     return value;
   }
 
-  if (value === 'Assigned to Depot' || value === 'Assigned to Attendant' || value === 'Packed') {
+  if (value === 'Assigned to Outlet' || value === 'Assigned to Attendant' || value === 'Packed') {
     return 'Processing';
   }
 

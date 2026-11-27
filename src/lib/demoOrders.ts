@@ -2,6 +2,7 @@ import type { Order } from '../types';
 
 export const DEMO_ORDER_PREFIX = 'demo-order-';
 const LOCAL_DEMO_ORDERS_KEY = 'sfm-demo-orders';
+const SHARED_DEMO_ORDERS_ENDPOINT = '/local-api/demo-orders';
 
 const DEMO_PENDING_ORDERS: Order[] = [
   {
@@ -19,8 +20,8 @@ const DEMO_PENDING_ORDERS: Order[] = [
     status: 'Order Received',
     order_status: 'Order Received',
     payment_status: 'PENDING',
-    is_shared_with_depot: false,
-    depot_code: null,
+    is_shared_with_outlet: false,
+    outlet_code: null,
     division: 'Kawempe Division',
     created_at: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
   },
@@ -40,8 +41,8 @@ const DEMO_PENDING_ORDERS: Order[] = [
     status: 'Order Received',
     order_status: 'Order Received',
     payment_status: 'PENDING',
-    is_shared_with_depot: false,
-    depot_code: null,
+    is_shared_with_outlet: false,
+    outlet_code: null,
     division: 'Nakawa Division',
     created_at: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
   },
@@ -61,8 +62,8 @@ const DEMO_PENDING_ORDERS: Order[] = [
     status: 'Order Received',
     order_status: 'Order Received',
     payment_status: 'PENDING',
-    is_shared_with_depot: false,
-    depot_code: null,
+    is_shared_with_outlet: false,
+    outlet_code: null,
     division: 'Kampala Central',
     created_at: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
   },
@@ -81,8 +82,8 @@ const DEMO_PENDING_ORDERS: Order[] = [
     status: 'Order Received',
     order_status: 'Order Received',
     payment_status: 'PENDING',
-    is_shared_with_depot: false,
-    depot_code: null,
+    is_shared_with_outlet: false,
+    outlet_code: null,
     division: 'Makindye Division',
     created_at: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString(),
   },
@@ -101,17 +102,57 @@ const DEMO_PENDING_ORDERS: Order[] = [
     status: 'Order Received',
     order_status: 'Order Received',
     payment_status: 'PENDING',
-    is_shared_with_depot: false,
-    depot_code: null,
+    is_shared_with_outlet: false,
+    outlet_code: null,
     division: 'Rubaga Division',
     created_at: new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString(),
   },
 ];
 
+type LegacyOrder = {
+  is_shared_with_depot?: boolean;
+  depot_code?: string | null;
+  manual_depot_override?: boolean | null;
+  suggested_depot_code?: string | null;
+};
+
+function normalizeStoredOrder(order: Order & LegacyOrder): Order {
+  const {
+    is_shared_with_depot,
+    depot_code,
+    manual_depot_override,
+    suggested_depot_code,
+    ...current
+  } = order;
+
+  return {
+    ...current,
+    is_shared_with_outlet: current.is_shared_with_outlet ?? is_shared_with_depot ?? false,
+    outlet_code: current.outlet_code ?? depot_code ?? null,
+    manual_outlet_override: current.manual_outlet_override ?? manual_depot_override ?? null,
+    suggested_outlet_code: current.suggested_outlet_code ?? suggested_depot_code ?? null,
+  };
+}
+
+function mergeDemoOrders(orders: Order[]) {
+  const byId = new Map<string, Order>();
+
+  for (const order of orders) {
+    if (!order?.id) continue;
+    byId.set(order.id, normalizeStoredOrder(order as Order & LegacyOrder));
+  }
+
+  return Array.from(byId.values()).sort((a, b) =>
+    String(b.created_at || '').localeCompare(String(a.created_at || '')),
+  );
+}
+
 export function readDemoOrders() {
   try {
     const stored = window.localStorage.getItem(LOCAL_DEMO_ORDERS_KEY);
-    if (stored) return JSON.parse(stored) as Order[];
+    if (stored) {
+      return mergeDemoOrders(JSON.parse(stored) as Array<Order & LegacyOrder>);
+    }
   } catch {
     return DEMO_PENDING_ORDERS;
   }
@@ -121,7 +162,9 @@ export function readDemoOrders() {
 }
 
 export function writeDemoOrders(orders: Order[]) {
-  window.localStorage.setItem(LOCAL_DEMO_ORDERS_KEY, JSON.stringify(orders));
+  const merged = mergeDemoOrders(orders);
+  window.localStorage.setItem(LOCAL_DEMO_ORDERS_KEY, JSON.stringify(merged));
+  return merged;
 }
 
 export function updateDemoOrder(order: Order) {
@@ -131,6 +174,50 @@ export function updateDemoOrder(order: Order) {
     ? orders.map((item) => (item.id === order.id ? order : item))
     : [order, ...orders];
 
-  writeDemoOrders(nextOrders);
+  return writeDemoOrders(nextOrders);
+}
+
+export async function readSharedDemoOrders() {
+  const localOrders = readDemoOrders();
+
+  try {
+    const response = await fetch(SHARED_DEMO_ORDERS_ENDPOINT);
+    if (!response.ok) return localOrders;
+
+    const payload = (await response.json()) as { orders?: Order[] };
+    const sharedOrders = (payload.orders ?? []).map((order) =>
+      normalizeStoredOrder(order as Order & LegacyOrder),
+    );
+
+    // Shared file is the source of truth across admin/attendant ports.
+    // Local cache is only a fallback for missing ids.
+    const merged = mergeDemoOrders([...localOrders, ...sharedOrders]);
+    writeDemoOrders(merged);
+
+    await fetch(SHARED_DEMO_ORDERS_ENDPOINT, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ orders: merged }),
+    }).catch(() => null);
+
+    return merged;
+  } catch {
+    return localOrders;
+  }
+}
+
+export async function updateSharedDemoOrder(order: Order) {
+  const nextOrders = updateDemoOrder(order);
+
+  try {
+    await fetch(SHARED_DEMO_ORDERS_ENDPOINT, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ orders: nextOrders }),
+    });
+  } catch {
+    // Local cache still has the update for this origin.
+  }
+
   return nextOrders;
 }

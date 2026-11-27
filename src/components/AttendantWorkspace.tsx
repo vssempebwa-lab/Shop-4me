@@ -6,19 +6,30 @@ import {
   Loader2,
   MapPin,
   Phone,
+  PhoneCall,
+  Receipt,
   Truck,
   User,
   LogOut,
 } from 'lucide-react';
-import type { Depot, DepotRider, Order, UserRoleProfile } from '../types';
+import type { FinalBillItem, Outlet, OutletRider, Order, UserRoleProfile } from '../types';
+import {
+  applyFinalBillRules,
+  BILL_STATUS_META,
+  describeApprovalMethod,
+  getAmountToCollect,
+  getBillStatus,
+  getEstimatedTotal,
+} from '../lib/finalBill';
+import FinalBillEditor from './FinalBillEditor';
 import { supabase } from '../lib/supabase';
 import {
-  findDepotByCode,
-  formatDepotOption,
+  findOutletByCode,
+  formatOutletOption,
   formatDistributionAreas,
-  OFFICIAL_DEPOTS,
-} from '../lib/depots';
-import { DEMO_ORDER_PREFIX, readDemoOrders, updateDemoOrder } from '../lib/demoOrders';
+  OFFICIAL_OUTLETS,
+} from '../lib/outlets';
+import { DEMO_ORDER_PREFIX, readDemoOrders, readSharedDemoOrders, updateSharedDemoOrder } from '../lib/demoOrders';
 import { formatUGX } from '../lib/format';
 import {
   getNextOrderStatus,
@@ -51,16 +62,23 @@ export default function AttendantWorkspace({
   onRedirectToStorefront,
 }: AttendantWorkspaceProps) {
   const [orders, setOrders] = useState<Order[]>([]);
-  const [depots, setDepots] = useState<Depot[]>(OFFICIAL_DEPOTS);
-  const [riders, setRiders] = useState<DepotRider[]>([]);
+  const [outlets, setOutlets] = useState<Outlet[]>(OFFICIAL_OUTLETS);
+  const [riders, setRiders] = useState<OutletRider[]>([]);
   const [loading, setLoading] = useState(true);
   const [updatingOrderId, setUpdatingOrderId] = useState<string | null>(null);
   const [dispatchOrder, setDispatchOrder] = useState<Order | null>(null);
   const [paymentOrder, setPaymentOrder] = useState<Order | null>(null);
   const [paymentConfirmed, setPaymentConfirmed] = useState(false);
+  const [billOrder, setBillOrder] = useState<Order | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const isLocalFreeAccess = profile?.invited_by === 'local-free-access';
+  const [localOutletOverride, setLocalOutletOverride] = useState(() => {
+    if (typeof window === 'undefined') return '';
+    return window.sessionStorage.getItem('sfm-attendant-outlet-override') || '';
+  });
 
-  const assignedDepot = profile?.assigned_depot ?? '';
+  const assignedOutlet =
+    (isLocalFreeAccess && localOutletOverride) || profile?.assigned_outlet || '';
   const attendantName = profile?.full_name || profile?.email || 'Market Attendant';
   const attendantUserId = profile?.user_id ?? null;
   const profileUser: UserRoleProfile = profile ?? {
@@ -70,10 +88,10 @@ export default function AttendantWorkspace({
     avatar_url: null,
     role: 'attendant',
   };
-  const depot = findDepotByCode(depots, assignedDepot);
-  const depotRiders = useMemo(
-    () => riders.filter((rider) => rider.depot_code === assignedDepot),
-    [assignedDepot, riders],
+  const outlet = findOutletByCode(outlets, assignedOutlet);
+  const outletRiders = useMemo(
+    () => riders.filter((rider) => rider.outlet_code === assignedOutlet),
+    [assignedOutlet, riders],
   );
 
   useEffect(() => {
@@ -91,20 +109,32 @@ export default function AttendantWorkspace({
 
   useEffect(() => {
     void loadWorkspaceData();
-  }, [assignedDepot]);
+  }, [assignedOutlet]);
 
   useEffect(() => {
-    if (!assignedDepot) return;
+    const refreshSharedOrders = () => {
+      void loadOrders();
+    };
+    window.addEventListener('focus', refreshSharedOrders);
+    const intervalId = window.setInterval(refreshSharedOrders, 4000);
+    return () => {
+      window.removeEventListener('focus', refreshSharedOrders);
+      window.clearInterval(intervalId);
+    };
+  }, [assignedOutlet]);
+
+  useEffect(() => {
+    if (!assignedOutlet) return;
 
     const channel = supabase
-      .channel(`attendant-orders-${assignedDepot || 'unassigned'}`)
+      .channel(`attendant-orders-${assignedOutlet || 'unassigned'}`)
       .on(
         'postgres_changes',
         {
           event: '*',
           schema: 'public',
           table: 'orders',
-          filter: `depot_code=eq.${assignedDepot}`,
+          filter: `outlet_code=eq.${assignedOutlet}`,
         },
         () => {
           void loadOrders();
@@ -115,7 +145,7 @@ export default function AttendantWorkspace({
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [assignedDepot]);
+  }, [assignedOutlet]);
 
   const showToast = (message: string) => {
     setToast(message);
@@ -136,76 +166,78 @@ export default function AttendantWorkspace({
         ...metadata,
         attendant_user_id: attendantUserId,
         attendant_name: attendantName,
-        depot_code: assignedDepot,
+        outlet_code: assignedOutlet,
       },
     });
   };
 
   const loadWorkspaceData = async () => {
     setLoading(true);
-    await Promise.all([loadDepots(), loadRiders(), loadOrders()]);
+    await Promise.all([loadOutlets(), loadRiders(), loadOrders()]);
     setLoading(false);
   };
 
-  const loadDepots = async () => {
+  const loadOutlets = async () => {
     const { data, error } = await supabase
-      .from('depots')
+      .from('outlets')
       .select('*')
       .eq('is_active', true)
-      .order('depot_code');
+      .order('outlet_code');
 
     if (!error && data?.length) {
-      setDepots(data as Depot[]);
+      setOutlets(data as Outlet[]);
     } else {
-      setDepots(OFFICIAL_DEPOTS);
+      setOutlets(OFFICIAL_OUTLETS);
     }
   };
 
   const loadRiders = async () => {
-    if (!assignedDepot) {
+    if (!assignedOutlet) {
       setRiders([]);
       return;
     }
 
     const { data, error } = await supabase
-      .from('depot_riders')
+      .from('outlet_riders')
       .select('*')
-      .eq('depot_code', assignedDepot)
+      .eq('outlet_code', assignedOutlet)
       .eq('is_active', true)
       .order('name');
 
     if (!error) {
-      setRiders((data as DepotRider[]) ?? []);
+      setRiders((data as OutletRider[]) ?? []);
     }
   };
 
   const loadOrders = async () => {
-    if (!assignedDepot) {
+    if (!assignedOutlet) {
       setOrders([]);
       return;
     }
 
+    await readSharedDemoOrders();
+
     const { data, error } = await supabase
       .from('orders')
       .select('*, order_items(*)')
-      .eq('depot_code', assignedDepot)
-      .eq('is_shared_with_depot', true)
+      .eq('outlet_code', assignedOutlet)
+      .eq('is_shared_with_outlet', true)
       .order('created_at', { ascending: false });
 
     if (error) {
-      setOrders(getDemoOrdersForDepot(assignedDepot));
+      setOrders(getDemoOrdersForOutlet(assignedOutlet));
       return;
     }
 
     const liveOrders = ((data as Array<Record<string, unknown>>) ?? []).map(normalizeOrder);
-    const demoOrders = getDemoOrdersForDepot(assignedDepot);
+    const demoOrders = getDemoOrdersForOutlet(assignedOutlet);
     const liveIds = new Set(liveOrders.map((order) => order.id));
     const localOnlyOrders = demoOrders.filter((order) => !liveIds.has(order.id));
 
     setOrders([...localOnlyOrders, ...liveOrders]);
   };
 
-  const changeDepotOrderStatus = async (order: Order, nextState: OrderStatus) => {
+  const changeOutletOrderStatus = async (order: Order, nextState: OrderStatus) => {
     setUpdatingOrderId(order.id);
 
     const patch: Partial<Order> = {
@@ -222,7 +254,7 @@ export default function AttendantWorkspace({
 
     if (order.id.startsWith(DEMO_ORDER_PREFIX)) {
       const updatedOrder = { ...order, ...patch };
-      updateDemoOrder(updatedOrder);
+      await updateSharedDemoOrder(updatedOrder);
       setOrders((current) =>
         current.map((item) => (item.id === order.id ? updatedOrder : item)),
       );
@@ -250,7 +282,7 @@ export default function AttendantWorkspace({
     showToast(`Order updated to ${getStatusDisplay(nextState).label}.`);
   };
 
-  const dispatchRider = async (order: Order, rider: DepotRider) => {
+  const dispatchRider = async (order: Order, rider: OutletRider) => {
     setUpdatingOrderId(order.id);
 
     const patch: Partial<Order> = {
@@ -265,7 +297,7 @@ export default function AttendantWorkspace({
 
     if (order.id.startsWith(DEMO_ORDER_PREFIX)) {
       const updatedOrder = { ...order, ...patch };
-      updateDemoOrder(updatedOrder);
+      await updateSharedDemoOrder(updatedOrder);
       setDispatchOrder(null);
       setOrders((current) =>
         current.map((item) => (item.id === order.id ? updatedOrder : item)),
@@ -295,6 +327,87 @@ export default function AttendantWorkspace({
     showToast(`${rider.name} dispatched. Order is now in transit.`);
   };
 
+  /** Writes a bill change and returns the order as the database computed it. */
+  const saveBillPatch = async (order: Order, patch: Partial<Order>): Promise<Order | null> => {
+    setUpdatingOrderId(order.id);
+
+    if (order.id.startsWith(DEMO_ORDER_PREFIX)) {
+      const updatedOrder = applyFinalBillRules(order, patch);
+      await updateSharedDemoOrder(updatedOrder);
+      setOrders((current) => current.map((item) => (item.id === order.id ? updatedOrder : item)));
+      setUpdatingOrderId(null);
+      return updatedOrder;
+    }
+
+    const { data, error } = await supabase
+      .from('orders')
+      .update(patch)
+      .eq('id', order.id)
+      .select('*, order_items(*)')
+      .single();
+    setUpdatingOrderId(null);
+
+    if (error || !data) {
+      showToast(error?.message || 'Could not save the final bill.');
+      return null;
+    }
+
+    const updatedOrder = normalizeOrder(data as Record<string, unknown>);
+    setOrders((current) => current.map((item) => (item.id === order.id ? updatedOrder : item)));
+    return updatedOrder;
+  };
+
+  const submitFinalBill = async (order: Order, items: FinalBillItem[]) => {
+    const updatedOrder = await saveBillPatch(order, {
+      final_items: items,
+      bill_status: 'awaiting_approval',
+      bill_submitted_at: new Date().toISOString(),
+      bill_submitted_by_name: attendantName,
+      bill_customer_note: null,
+      handled_by_attendant_id: attendantUserId,
+      handled_by_attendant_name: attendantName,
+    });
+    if (!updatedOrder) return;
+
+    setBillOrder(null);
+    const approved = getBillStatus(updatedOrder) === 'approved';
+    if (!order.id.startsWith(DEMO_ORDER_PREFIX)) {
+      await writeActivityLog('attendant_final_bill_submitted', order, {
+        estimated_total: getEstimatedTotal(order),
+        final_total: updatedOrder.final_total,
+        bill_status: updatedOrder.bill_status,
+      });
+    }
+    showToast(
+      approved
+        ? `Final bill ${formatUGX(updatedOrder.final_total ?? 0)} is within the estimate. Ready to dispatch.`
+        : `Bill sent. Call ${order.contact_name} on ${order.phone} if they have not approved it soon.`,
+    );
+  };
+
+  const recordPhoneApproval = async (order: Order) => {
+    const confirmed = window.confirm(
+      `Confirm that ${order.contact_name} approved the final bill of ${formatUGX(
+        order.final_total ?? 0,
+      )} on a phone call. This is recorded against your name.`,
+    );
+    if (!confirmed) return;
+
+    const updatedOrder = await saveBillPatch(order, {
+      bill_status: 'approved',
+      bill_approval_method: 'phone_call',
+      bill_responded_at: new Date().toISOString(),
+    });
+    if (!updatedOrder) return;
+
+    if (!order.id.startsWith(DEMO_ORDER_PREFIX)) {
+      await writeActivityLog('attendant_final_bill_phone_approval', order, {
+        final_total: updatedOrder.final_total,
+      });
+    }
+    showToast('Phone approval recorded. Ready to dispatch.');
+  };
+
   const requestAdvance = (order: Order) => {
     const nextState = getNextOrderStatus(order);
     if (!nextState) return;
@@ -305,7 +418,7 @@ export default function AttendantWorkspace({
       return;
     }
 
-    void changeDepotOrderStatus(order, nextState);
+    void changeOutletOrderStatus(order, nextState);
   };
 
   if (!profile || profile.role !== 'attendant') {
@@ -314,7 +427,7 @@ export default function AttendantWorkspace({
         <EmptyState
           icon={<ClipboardList className="h-8 w-8" />}
           title="Attendant access required"
-          text="Sign in with a Market Attendant account to view a localized depot queue."
+          text="Sign in with a Market Attendant account to view a localized outlet queue."
         />
       </section>
     );
@@ -325,17 +438,42 @@ export default function AttendantWorkspace({
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h2 className="text-2xl font-extrabold text-brand-800">Market Attendant Workspace</h2>
-          <p className="text-sm text-gray-500">Process routed orders from your assigned hub.</p>
+          <p className="text-sm text-gray-500">
+            View orders shared by admin, then move each one through Received → Processing → Transit → Delivered.
+          </p>
         </div>
-        {depot ? (
+        {outlet ? (
           <div className="min-w-[280px] rounded-2xl border border-brand-100 bg-white px-4 py-3 shadow-sm">
             <div className="flex items-start gap-3">
               <UserAvatar user={profileUser} size="md" />
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-extrabold text-brand-800">
-                  {depot.hub_market || depot.name} - {depot.depot_code}
+                  {outlet.hub_market || outlet.name} - {outlet.outlet_code}
                 </p>
-                <p className="text-xs font-medium text-brand-700">{depot.division}</p>
+                <p className="text-xs font-medium text-brand-700">{outlet.division}</p>
+                {isLocalFreeAccess && (
+                  <label className="mt-2 block text-[11px] font-semibold text-gray-600">
+                    View outlet queue
+                    <select
+                      value={assignedOutlet}
+                      onChange={(event) => {
+                        const nextOutlet = event.target.value;
+                        setLocalOutletOverride(nextOutlet);
+                        window.sessionStorage.setItem(
+                          'sfm-attendant-outlet-override',
+                          nextOutlet,
+                        );
+                      }}
+                      className="mt-1 w-full rounded-xl border border-gray-200 bg-white px-2.5 py-2 text-xs font-semibold text-gray-800 outline-none transition focus:border-brand-400 focus:ring-2 focus:ring-brand-100"
+                    >
+                      {outlets.map((item) => (
+                        <option key={item.outlet_code} value={item.outlet_code}>
+                          {formatOutletOption(item)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
                 <p className="mt-2 text-xs font-semibold text-gray-700">
                   Attendant: {attendantName}
                 </p>
@@ -346,23 +484,23 @@ export default function AttendantWorkspace({
               <button
                 type="button"
                 onClick={() => void onLogout()}
-                className="inline-flex shrink-0 items-center gap-1 rounded-full border border-gray-200 px-2.5 py-1.5 text-[11px] font-bold text-gray-600 transition hover:border-red-200 hover:bg-red-50 hover:text-red-600"
+                className="inline-flex shrink-0 items-center gap-2 rounded-full border border-red-100 bg-red-50 px-3 py-2 text-xs font-extrabold text-red-600 transition hover:border-red-200 hover:bg-red-100 focus:outline-none focus:ring-2 focus:ring-red-200 focus:ring-offset-2"
               >
-                <LogOut className="h-3.5 w-3.5" />
-                Switch
+                <LogOut className="h-4 w-4" />
+                Logout
               </button>
             </div>
           </div>
         ) : (
           <div className="rounded-2xl border border-red-100 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
-            Invalid assigned depot: {assignedDepot || 'Not assigned'}
+            Invalid assigned outlet: {assignedOutlet || 'Not assigned'}
           </div>
         )}
       </div>
 
-      {depot && (
+      {outlet && (
         <p className="mt-3 rounded-2xl border border-gray-100 bg-white px-4 py-3 text-xs font-medium text-gray-500 shadow-sm">
-          Distribution range: {formatDistributionAreas(depot)}
+          Distribution range: {formatDistributionAreas(outlet)}
         </p>
       )}
 
@@ -381,13 +519,13 @@ export default function AttendantWorkspace({
       {loading ? (
         <div className="py-12 text-center text-sm text-gray-400">
           <Loader2 className="mx-auto h-6 w-6 animate-spin" />
-          <p className="mt-2">Loading depot queue...</p>
+          <p className="mt-2">Loading outlet queue...</p>
         </div>
       ) : orders.length === 0 ? (
         <EmptyState
           icon={<Truck className="h-8 w-8" />}
           title="No orders in your queue right now"
-          text="Orders routed to this depot will appear here automatically."
+          text="Orders routed to this outlet will appear here automatically."
         />
       ) : (
         <div className="mt-5 space-y-4">
@@ -395,19 +533,30 @@ export default function AttendantWorkspace({
             <OrderQueueCard
               key={order.id}
               order={order}
-              depot={depot}
+              outlet={outlet}
               loading={updatingOrderId === order.id}
               onAdvance={() => requestAdvance(order)}
               onDispatch={() => setDispatchOrder(order)}
+              onOpenBill={() => setBillOrder(order)}
+              onPhoneApproval={() => void recordPhoneApproval(order)}
             />
           ))}
         </div>
       )}
 
+      {billOrder && (
+        <FinalBillEditor
+          order={billOrder}
+          saving={updatingOrderId === billOrder.id}
+          onClose={() => setBillOrder(null)}
+          onSubmit={(items) => void submitFinalBill(billOrder, items)}
+        />
+      )}
+
       {dispatchOrder && (
         <RiderDispatchPanel
           order={dispatchOrder}
-          riders={depotRiders}
+          riders={outletRiders}
           loading={updatingOrderId === dispatchOrder.id}
           onClose={() => setDispatchOrder(null)}
           onDispatch={(rider) => void dispatchRider(dispatchOrder, rider)}
@@ -422,7 +571,7 @@ export default function AttendantWorkspace({
           onConfirmedChange={setPaymentConfirmed}
           onClose={() => setPaymentOrder(null)}
           onSubmit={() => {
-            void changeDepotOrderStatus(paymentOrder, 'Delivered');
+            void changeOutletOrderStatus(paymentOrder, 'Delivered');
             setPaymentOrder(null);
           }}
         />
@@ -435,23 +584,33 @@ export default function AttendantWorkspace({
 
 function OrderQueueCard({
   order,
-  depot,
+  outlet,
   loading,
   onAdvance,
   onDispatch,
+  onOpenBill,
+  onPhoneApproval,
 }: {
   order: Order;
-  depot: Depot | null;
+  outlet: Outlet | null;
   loading: boolean;
   onAdvance: () => void;
   onDispatch: () => void;
+  onOpenBill: () => void;
+  onPhoneApproval: () => void;
 }) {
   const status = normalizeOrderStatus(order.order_status ?? order.status);
   const statusDisplay = getStatusDisplay(status);
   const nextStatus = getNextOrderStatus(order);
   const stale = isOrderStale(order, status);
-  const total = (order.subtotal ?? 0) + (order.delivery_fee ?? 0);
+  const estimatedTotal = getEstimatedTotal(order);
   const routedBy = order.shared_by_admin_name || 'Admin';
+  const billStatus = getBillStatus(order);
+  const billApproved = billStatus === 'approved';
+  // Goods are bought during Processing; the rider may only leave once the
+  // customer has agreed to what they will pay.
+  const billBlocksDispatch = status === 'Processing' && !billApproved;
+  const showBillActions = status === 'Processing';
 
   return (
     <article className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
@@ -472,7 +631,7 @@ function OrderQueueCard({
           <span className="rounded-full bg-brand-50 px-2.5 py-1 text-xs font-bold text-brand-700">
             {statusDisplay.label}
           </span>
-          {order.manual_depot_override && (
+          {order.manual_outlet_override && (
             <span className="rounded-full bg-amber-50 px-2.5 py-1 text-xs font-bold text-amber-700">
               Manually assigned
             </span>
@@ -493,7 +652,7 @@ function OrderQueueCard({
         <InfoLine icon={<Phone className="h-3.5 w-3.5" />} text={order.phone} />
         <InfoLine
           icon={<MapPin className="h-3.5 w-3.5" />}
-          text={depot ? formatDepotOption(depot) : order.depot_code || 'Pickup station'}
+          text={outlet ? formatOutletOption(outlet) : order.outlet_code || 'Pickup station'}
         />
       </div>
 
@@ -512,10 +671,43 @@ function OrderQueueCard({
           ))}
         </div>
         <div className="mt-2 flex justify-between border-t border-gray-200 pt-2 text-sm">
-          <span className="font-semibold text-gray-700">Total</span>
-          <span className="font-extrabold text-brand-700">{formatUGX(total)}</span>
+          <span className="font-semibold text-gray-700">Estimated total</span>
+          <span className={typeof order.final_total === 'number' ? 'font-semibold text-gray-500' : 'font-extrabold text-brand-700'}>
+            {formatUGX(estimatedTotal)}
+          </span>
         </div>
+        {typeof order.final_total === 'number' && (
+          <div className="mt-1 flex justify-between text-sm">
+            <span className="font-semibold text-gray-700">Final bill</span>
+            <span className="font-extrabold text-brand-700">{formatUGX(order.final_total)}</span>
+          </div>
+        )}
       </div>
+
+      {(billStatus !== 'not_started' || showBillActions) && (
+        <div className={`mt-3 rounded-xl px-3 py-2 text-xs font-semibold ring-1 ${BILL_STATUS_META[billStatus].badgeClass}`}>
+          <div className="flex items-center gap-1.5">
+            <Receipt className="h-3.5 w-3.5" />
+            {billStatus === 'not_started'
+              ? 'Shop, then enter what you paid to create the final bill.'
+              : BILL_STATUS_META[billStatus].label}
+          </div>
+          {billApproved && describeApprovalMethod(order) && (
+            <p className="mt-0.5 font-medium opacity-80">{describeApprovalMethod(order)}</p>
+          )}
+          {billStatus === 'awaiting_approval' && (
+            <p className="mt-0.5 font-medium">
+              {order.user_id
+                ? `${order.contact_name} can approve in the app, or call `
+                : 'Guest order: the customer cannot approve in the app, so call '}
+              <a href={`tel:${order.phone}`} className="underline">{order.phone}</a>.
+            </p>
+          )}
+          {billStatus === 'queried' && order.bill_customer_note && (
+            <p className="mt-0.5 font-medium">Customer says: "{order.bill_customer_note}"</p>
+          )}
+        </div>
+      )}
 
       <StatusStepper status={status} />
 
@@ -526,7 +718,33 @@ function OrderQueueCard({
       )}
 
       <div className="mt-4 flex flex-wrap justify-end gap-2">
-        {status === 'Processing' && (
+        {showBillActions && (
+          <button
+            type="button"
+            onClick={onOpenBill}
+            disabled={loading}
+            className={
+              billApproved
+                ? 'inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white px-4 py-2 text-sm font-bold text-gray-700 transition hover:bg-gray-50'
+                : 'inline-flex items-center gap-2 rounded-full bg-brand-600 px-4 py-2 text-sm font-bold text-white transition hover:bg-brand-700 disabled:bg-gray-300'
+            }
+          >
+            <Receipt className="h-4 w-4" />
+            {billStatus === 'not_started' ? 'Enter final bill' : 'Edit final bill'}
+          </button>
+        )}
+        {showBillActions && billStatus === 'awaiting_approval' && (
+          <button
+            type="button"
+            onClick={onPhoneApproval}
+            disabled={loading}
+            className="inline-flex items-center gap-2 rounded-full border border-brand-200 bg-brand-50 px-4 py-2 text-sm font-bold text-brand-700 transition hover:bg-brand-100"
+          >
+            <PhoneCall className="h-4 w-4" />
+            Approved on phone
+          </button>
+        )}
+        {status === 'Processing' && !billBlocksDispatch && (
           <button
             type="button"
             onClick={onDispatch}
@@ -536,16 +754,21 @@ function OrderQueueCard({
             Call Rider
           </button>
         )}
-        {nextStatus && (
+        {nextStatus && !billBlocksDispatch && (
           <button
             type="button"
             onClick={onAdvance}
             disabled={loading}
-            className="inline-flex min-w-40 items-center justify-center gap-2 rounded-full bg-brand-600 px-4 py-2 text-sm font-bold text-white transition hover:bg-brand-700 disabled:bg-gray-300"
+            className="inline-flex min-w-44 items-center justify-center gap-2 rounded-full bg-brand-600 px-4 py-2 text-sm font-bold text-white transition hover:bg-brand-700 disabled:bg-gray-300"
           >
             {loading && <Loader2 className="h-4 w-4 animate-spin" />}
             {getAdvanceLabel(nextStatus)}
           </button>
+        )}
+        {status === 'Delivered' && (
+          <span className="inline-flex items-center rounded-full bg-brand-50 px-4 py-2 text-sm font-bold text-brand-700">
+            Completed
+          </span>
         )}
       </div>
     </article>
@@ -586,10 +809,10 @@ function RiderDispatchPanel({
   onDispatch,
 }: {
   order: Order;
-  riders: DepotRider[];
+  riders: OutletRider[];
   loading: boolean;
   onClose: () => void;
-  onDispatch: (rider: DepotRider) => void;
+  onDispatch: (rider: OutletRider) => void;
 }) {
   return (
     <div className="fixed inset-0 z-[70] flex items-end justify-center sm:items-center">
@@ -602,7 +825,7 @@ function RiderDispatchPanel({
         <div className="mt-4 space-y-2">
           {riders.length === 0 ? (
             <p className="rounded-xl bg-gray-50 p-3 text-sm text-gray-500">
-              No active Boda-boda riders are registered for this depot yet.
+              No active Boda-boda riders are registered for this outlet yet.
             </p>
           ) : (
             riders.map((rider) => (
@@ -620,7 +843,7 @@ function RiderDispatchPanel({
                   type="button"
                   onClick={() => onDispatch(rider)}
                   disabled={loading}
-                  className="inline-flex items-center gap-2 rounded-full bg-gold-500 px-3 py-1.5 text-xs font-bold text-brand-950 disabled:bg-gray-300"
+                  className="inline-flex items-center gap-2 rounded-full bg-gold-500 px-3 py-1.5 text-xs font-bold text-white disabled:bg-gray-300 disabled:text-gray-600"
                 >
                   {loading && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
                   Dispatch
@@ -657,6 +880,14 @@ function PaymentConfirmationModal({
         <p className="mt-1 text-sm text-gray-500">
           Before closing #{order.id.slice(0, 8).toUpperCase()}, confirm the client paid at doorstep.
         </p>
+        <div className="mt-3 flex items-center justify-between rounded-2xl border border-brand-100 bg-brand-50 px-3 py-2.5">
+          <span className="text-sm font-semibold text-brand-800">
+            {typeof order.final_total === 'number' && order.bill_status === 'approved'
+              ? 'Amount to collect (final bill)'
+              : 'Amount to collect (estimate)'}
+          </span>
+          <span className="text-lg font-extrabold text-brand-700">{formatUGX(getAmountToCollect(order))}</span>
+        </div>
         <label className="mt-4 flex items-start gap-2 rounded-2xl bg-gray-50 p-3 text-sm font-semibold text-gray-700">
           <input
             type="checkbox"
@@ -664,7 +895,7 @@ function PaymentConfirmationModal({
             onChange={(event) => onConfirmedChange(event.target.checked)}
             className="mt-0.5 h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500"
           />
-          Confirm client paid via MoMo/Airtel at doorstep.
+          Confirm client paid {formatUGX(getAmountToCollect(order))} via MoMo/Airtel at doorstep.
         </label>
         <div className="mt-5 flex justify-end gap-2">
           <button
@@ -791,16 +1022,16 @@ function normalizeOrder(order: Record<string, unknown>): Order {
     items: joinedItems.length ? joinedItems : jsonItems,
     order_status: normalizeOrderStatus((order.order_status ?? order.status) as string),
     payment_status: (order.payment_status as Order['payment_status']) ?? 'PENDING',
-    is_shared_with_depot: Boolean(order.is_shared_with_depot),
+    is_shared_with_outlet: Boolean(order.is_shared_with_outlet),
   };
 }
 
-function getDemoOrdersForDepot(assignedDepot: string) {
+function getDemoOrdersForOutlet(assignedOutlet: string) {
   return readDemoOrders()
     .map((order) => normalizeOrder(order as unknown as Record<string, unknown>))
     .filter(
       (order) =>
-        order.depot_code === assignedDepot &&
-        order.is_shared_with_depot === true,
+        order.outlet_code === assignedOutlet &&
+        order.is_shared_with_outlet === true,
     );
 }

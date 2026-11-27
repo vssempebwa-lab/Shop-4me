@@ -34,6 +34,25 @@ export interface OrderItem {
   created_at?: string;
 }
 
+export type FinalBillLineStatus = 'bought' | 'substituted' | 'unavailable';
+
+export interface FinalBillItem {
+  product_id: string;
+  name: string;
+  unit: string;
+  quantity: number;
+  /** Catalogue unit price the customer saw at checkout. */
+  estimated_unit_price: number;
+  status: FinalBillLineStatus;
+  /** What the attendant actually paid for the whole line, in UGX. */
+  actual_line_total: number;
+  substitute_name?: string | null;
+  note?: string | null;
+}
+
+export type BillStatus = 'not_started' | 'awaiting_approval' | 'approved' | 'queried';
+export type BillApprovalMethod = 'customer_app' | 'phone_call' | 'auto_within_estimate';
+
 export interface Order {
   id: string;
   contact_name: string;
@@ -49,26 +68,35 @@ export interface Order {
   status: string;
   order_status?: 'Order Received' | 'Pending' | 'Processing' | 'Transit' | 'Delivered' | 'Cancelled';
   payment_status?: 'PENDING' | 'PAID' | 'FAILED' | 'REFUNDED';
-  is_shared_with_depot?: boolean;
-  depot_code?: string | null;
+  is_shared_with_outlet?: boolean;
+  outlet_code?: string | null;
   division?: string | null;
   shared_at?: string | null;
   shared_by?: string | null;
   shared_by_admin_id?: string | null;
   shared_by_admin_name?: string | null;
-  manual_depot_override?: boolean | null;
-  suggested_depot_code?: string | null;
+  manual_outlet_override?: boolean | null;
+  suggested_outlet_code?: string | null;
   dispatched_rider_id?: string | null;
   dispatched_rider_name?: string | null;
   dispatched_at?: string | null;
   handled_by_attendant_id?: string | null;
   handled_by_attendant_name?: string | null;
   delivered_at?: string | null;
+  final_items?: FinalBillItem[] | null;
+  final_subtotal?: number | null;
+  final_total?: number | null;
+  bill_status?: BillStatus | null;
+  bill_submitted_at?: string | null;
+  bill_submitted_by_name?: string | null;
+  bill_responded_at?: string | null;
+  bill_approval_method?: BillApprovalMethod | null;
+  bill_customer_note?: string | null;
   created_at: string;
 }
 
-export interface Depot {
-  depot_code: string;
+export interface Outlet {
+  outlet_code: string;
   name: string;
   division: string;
   hub_market?: string | null;
@@ -77,9 +105,9 @@ export interface Depot {
   is_active: boolean;
 }
 
-export interface DepotRider {
+export interface OutletRider {
   id: string;
-  depot_code: string;
+  outlet_code: string;
   name: string;
   phone: string;
   is_active: boolean;
@@ -90,9 +118,10 @@ export interface UserRoleProfile {
   user_id: string;
   email?: string | null;
   full_name?: string | null;
+  phone_number?: string | null;
   avatar_url?: string | null;
   role: 'admin' | 'attendant' | 'merchant' | 'customer';
-  assigned_depot?: string | null;
+  assigned_outlet?: string | null;
   is_approved?: boolean;
   is_active?: boolean;
   invited_by?: string | null;
