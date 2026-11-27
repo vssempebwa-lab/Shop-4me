@@ -6,11 +6,22 @@ import {
   Loader2,
   MapPin,
   Phone,
+  PhoneCall,
+  Receipt,
   Truck,
   User,
   LogOut,
 } from 'lucide-react';
-import type { Outlet, OutletRider, Order, UserRoleProfile } from '../types';
+import type { FinalBillItem, Outlet, OutletRider, Order, UserRoleProfile } from '../types';
+import {
+  applyFinalBillRules,
+  BILL_STATUS_META,
+  describeApprovalMethod,
+  getAmountToCollect,
+  getBillStatus,
+  getEstimatedTotal,
+} from '../lib/finalBill';
+import FinalBillEditor from './FinalBillEditor';
 import { supabase } from '../lib/supabase';
 import {
   findOutletByCode,
@@ -58,6 +69,7 @@ export default function AttendantWorkspace({
   const [dispatchOrder, setDispatchOrder] = useState<Order | null>(null);
   const [paymentOrder, setPaymentOrder] = useState<Order | null>(null);
   const [paymentConfirmed, setPaymentConfirmed] = useState(false);
+  const [billOrder, setBillOrder] = useState<Order | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const isLocalFreeAccess = profile?.invited_by === 'local-free-access';
   const [localOutletOverride, setLocalOutletOverride] = useState(() => {
@@ -315,6 +327,87 @@ export default function AttendantWorkspace({
     showToast(`${rider.name} dispatched. Order is now in transit.`);
   };
 
+  /** Writes a bill change and returns the order as the database computed it. */
+  const saveBillPatch = async (order: Order, patch: Partial<Order>): Promise<Order | null> => {
+    setUpdatingOrderId(order.id);
+
+    if (order.id.startsWith(DEMO_ORDER_PREFIX)) {
+      const updatedOrder = applyFinalBillRules(order, patch);
+      await updateSharedDemoOrder(updatedOrder);
+      setOrders((current) => current.map((item) => (item.id === order.id ? updatedOrder : item)));
+      setUpdatingOrderId(null);
+      return updatedOrder;
+    }
+
+    const { data, error } = await supabase
+      .from('orders')
+      .update(patch)
+      .eq('id', order.id)
+      .select('*, order_items(*)')
+      .single();
+    setUpdatingOrderId(null);
+
+    if (error || !data) {
+      showToast(error?.message || 'Could not save the final bill.');
+      return null;
+    }
+
+    const updatedOrder = normalizeOrder(data as Record<string, unknown>);
+    setOrders((current) => current.map((item) => (item.id === order.id ? updatedOrder : item)));
+    return updatedOrder;
+  };
+
+  const submitFinalBill = async (order: Order, items: FinalBillItem[]) => {
+    const updatedOrder = await saveBillPatch(order, {
+      final_items: items,
+      bill_status: 'awaiting_approval',
+      bill_submitted_at: new Date().toISOString(),
+      bill_submitted_by_name: attendantName,
+      bill_customer_note: null,
+      handled_by_attendant_id: attendantUserId,
+      handled_by_attendant_name: attendantName,
+    });
+    if (!updatedOrder) return;
+
+    setBillOrder(null);
+    const approved = getBillStatus(updatedOrder) === 'approved';
+    if (!order.id.startsWith(DEMO_ORDER_PREFIX)) {
+      await writeActivityLog('attendant_final_bill_submitted', order, {
+        estimated_total: getEstimatedTotal(order),
+        final_total: updatedOrder.final_total,
+        bill_status: updatedOrder.bill_status,
+      });
+    }
+    showToast(
+      approved
+        ? `Final bill ${formatUGX(updatedOrder.final_total ?? 0)} is within the estimate. Ready to dispatch.`
+        : `Bill sent. Call ${order.contact_name} on ${order.phone} if they have not approved it soon.`,
+    );
+  };
+
+  const recordPhoneApproval = async (order: Order) => {
+    const confirmed = window.confirm(
+      `Confirm that ${order.contact_name} approved the final bill of ${formatUGX(
+        order.final_total ?? 0,
+      )} on a phone call. This is recorded against your name.`,
+    );
+    if (!confirmed) return;
+
+    const updatedOrder = await saveBillPatch(order, {
+      bill_status: 'approved',
+      bill_approval_method: 'phone_call',
+      bill_responded_at: new Date().toISOString(),
+    });
+    if (!updatedOrder) return;
+
+    if (!order.id.startsWith(DEMO_ORDER_PREFIX)) {
+      await writeActivityLog('attendant_final_bill_phone_approval', order, {
+        final_total: updatedOrder.final_total,
+      });
+    }
+    showToast('Phone approval recorded. Ready to dispatch.');
+  };
+
   const requestAdvance = (order: Order) => {
     const nextState = getNextOrderStatus(order);
     if (!nextState) return;
@@ -444,9 +537,20 @@ export default function AttendantWorkspace({
               loading={updatingOrderId === order.id}
               onAdvance={() => requestAdvance(order)}
               onDispatch={() => setDispatchOrder(order)}
+              onOpenBill={() => setBillOrder(order)}
+              onPhoneApproval={() => void recordPhoneApproval(order)}
             />
           ))}
         </div>
+      )}
+
+      {billOrder && (
+        <FinalBillEditor
+          order={billOrder}
+          saving={updatingOrderId === billOrder.id}
+          onClose={() => setBillOrder(null)}
+          onSubmit={(items) => void submitFinalBill(billOrder, items)}
+        />
       )}
 
       {dispatchOrder && (
@@ -484,19 +588,29 @@ function OrderQueueCard({
   loading,
   onAdvance,
   onDispatch,
+  onOpenBill,
+  onPhoneApproval,
 }: {
   order: Order;
   outlet: Outlet | null;
   loading: boolean;
   onAdvance: () => void;
   onDispatch: () => void;
+  onOpenBill: () => void;
+  onPhoneApproval: () => void;
 }) {
   const status = normalizeOrderStatus(order.order_status ?? order.status);
   const statusDisplay = getStatusDisplay(status);
   const nextStatus = getNextOrderStatus(order);
   const stale = isOrderStale(order, status);
-  const total = (order.subtotal ?? 0) + (order.delivery_fee ?? 0);
+  const estimatedTotal = getEstimatedTotal(order);
   const routedBy = order.shared_by_admin_name || 'Admin';
+  const billStatus = getBillStatus(order);
+  const billApproved = billStatus === 'approved';
+  // Goods are bought during Processing; the rider may only leave once the
+  // customer has agreed to what they will pay.
+  const billBlocksDispatch = status === 'Processing' && !billApproved;
+  const showBillActions = status === 'Processing';
 
   return (
     <article className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
@@ -557,10 +671,43 @@ function OrderQueueCard({
           ))}
         </div>
         <div className="mt-2 flex justify-between border-t border-gray-200 pt-2 text-sm">
-          <span className="font-semibold text-gray-700">Total</span>
-          <span className="font-extrabold text-brand-700">{formatUGX(total)}</span>
+          <span className="font-semibold text-gray-700">Estimated total</span>
+          <span className={typeof order.final_total === 'number' ? 'font-semibold text-gray-500' : 'font-extrabold text-brand-700'}>
+            {formatUGX(estimatedTotal)}
+          </span>
         </div>
+        {typeof order.final_total === 'number' && (
+          <div className="mt-1 flex justify-between text-sm">
+            <span className="font-semibold text-gray-700">Final bill</span>
+            <span className="font-extrabold text-brand-700">{formatUGX(order.final_total)}</span>
+          </div>
+        )}
       </div>
+
+      {(billStatus !== 'not_started' || showBillActions) && (
+        <div className={`mt-3 rounded-xl px-3 py-2 text-xs font-semibold ring-1 ${BILL_STATUS_META[billStatus].badgeClass}`}>
+          <div className="flex items-center gap-1.5">
+            <Receipt className="h-3.5 w-3.5" />
+            {billStatus === 'not_started'
+              ? 'Shop, then enter what you paid to create the final bill.'
+              : BILL_STATUS_META[billStatus].label}
+          </div>
+          {billApproved && describeApprovalMethod(order) && (
+            <p className="mt-0.5 font-medium opacity-80">{describeApprovalMethod(order)}</p>
+          )}
+          {billStatus === 'awaiting_approval' && (
+            <p className="mt-0.5 font-medium">
+              {order.user_id
+                ? `${order.contact_name} can approve in the app, or call `
+                : 'Guest order: the customer cannot approve in the app, so call '}
+              <a href={`tel:${order.phone}`} className="underline">{order.phone}</a>.
+            </p>
+          )}
+          {billStatus === 'queried' && order.bill_customer_note && (
+            <p className="mt-0.5 font-medium">Customer says: "{order.bill_customer_note}"</p>
+          )}
+        </div>
+      )}
 
       <StatusStepper status={status} />
 
@@ -571,7 +718,33 @@ function OrderQueueCard({
       )}
 
       <div className="mt-4 flex flex-wrap justify-end gap-2">
-        {status === 'Processing' && (
+        {showBillActions && (
+          <button
+            type="button"
+            onClick={onOpenBill}
+            disabled={loading}
+            className={
+              billApproved
+                ? 'inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white px-4 py-2 text-sm font-bold text-gray-700 transition hover:bg-gray-50'
+                : 'inline-flex items-center gap-2 rounded-full bg-brand-600 px-4 py-2 text-sm font-bold text-white transition hover:bg-brand-700 disabled:bg-gray-300'
+            }
+          >
+            <Receipt className="h-4 w-4" />
+            {billStatus === 'not_started' ? 'Enter final bill' : 'Edit final bill'}
+          </button>
+        )}
+        {showBillActions && billStatus === 'awaiting_approval' && (
+          <button
+            type="button"
+            onClick={onPhoneApproval}
+            disabled={loading}
+            className="inline-flex items-center gap-2 rounded-full border border-brand-200 bg-brand-50 px-4 py-2 text-sm font-bold text-brand-700 transition hover:bg-brand-100"
+          >
+            <PhoneCall className="h-4 w-4" />
+            Approved on phone
+          </button>
+        )}
+        {status === 'Processing' && !billBlocksDispatch && (
           <button
             type="button"
             onClick={onDispatch}
@@ -581,7 +754,7 @@ function OrderQueueCard({
             Call Rider
           </button>
         )}
-        {nextStatus && (
+        {nextStatus && !billBlocksDispatch && (
           <button
             type="button"
             onClick={onAdvance}
@@ -707,6 +880,14 @@ function PaymentConfirmationModal({
         <p className="mt-1 text-sm text-gray-500">
           Before closing #{order.id.slice(0, 8).toUpperCase()}, confirm the client paid at doorstep.
         </p>
+        <div className="mt-3 flex items-center justify-between rounded-2xl border border-brand-100 bg-brand-50 px-3 py-2.5">
+          <span className="text-sm font-semibold text-brand-800">
+            {typeof order.final_total === 'number' && order.bill_status === 'approved'
+              ? 'Amount to collect (final bill)'
+              : 'Amount to collect (estimate)'}
+          </span>
+          <span className="text-lg font-extrabold text-brand-700">{formatUGX(getAmountToCollect(order))}</span>
+        </div>
         <label className="mt-4 flex items-start gap-2 rounded-2xl bg-gray-50 p-3 text-sm font-semibold text-gray-700">
           <input
             type="checkbox"
@@ -714,7 +895,7 @@ function PaymentConfirmationModal({
             onChange={(event) => onConfirmedChange(event.target.checked)}
             className="mt-0.5 h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500"
           />
-          Confirm client paid via MoMo/Airtel at doorstep.
+          Confirm client paid {formatUGX(getAmountToCollect(order))} via MoMo/Airtel at doorstep.
         </label>
         <div className="mt-5 flex justify-end gap-2">
           <button

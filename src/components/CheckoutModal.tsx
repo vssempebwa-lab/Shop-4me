@@ -17,6 +17,7 @@ import { fetchPublicAttendantForOutlet } from '../lib/attendants';
 import { generateShopListPDF, preloadShopListPdfGenerator } from '../lib/shopListPdf';
 import { DEFAULT_PAYMENT_SETTINGS, fetchPaymentSettings, type PaymentSettings } from '../lib/paymentSettings';
 import AttendantProfileCard from './AttendantProfileCard';
+import FinalBillPanel from './FinalBillPanel';
 
 interface CheckoutModalProps {
   open: boolean;
@@ -319,7 +320,7 @@ export default function CheckoutModal({
             </div>
             <div className="mt-3 space-y-2 border-t border-brand-200/60 pt-3">
               <div className="flex items-center justify-between">
-                <span className="text-sm font-semibold text-gray-700">Subtotal</span>
+                <span className="text-sm font-semibold text-gray-700">Estimated subtotal</span>
                 <span className="text-gray-800">{formatUGX(subtotal)}</span>
               </div>
               <div className="flex items-center justify-between">
@@ -327,9 +328,13 @@ export default function CheckoutModal({
                 <span className="text-gray-800">{formatUGX(DELIVERY_FEE)}</span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-sm font-semibold text-gray-700">Total Amount Due</span>
+                <span className="text-sm font-semibold text-gray-700">Estimated total</span>
                 <span className="text-lg font-extrabold text-brand-700">{formatUGX(total)}</span>
               </div>
+              <p className="text-xs leading-relaxed text-gray-500">
+                Market prices change daily. Your attendant sends a final bill after shopping. If it is above
+                this estimate or anything is replaced, you approve it before delivery.
+              </p>
             </div>
           </div>
 
@@ -497,7 +502,7 @@ export default function CheckoutModal({
                   <Loader2 className="h-4 w-4 animate-spin" /> Placing order...
                 </>
               ) : (
-                <>Place Order - {formatUGX(total)}</>
+                <>Place Order · est. {formatUGX(total)}</>
               )}
             </button>
           </div>
@@ -586,9 +591,15 @@ function formatPaymentMethodValue(provider: 'mtn' | 'airtel', settings: PaymentS
 export function OrderConfirmation({
   order,
   onClose,
+  viewerUserId = null,
+  variant = 'placed',
 }: {
   order: Order;
   onClose: () => void;
+  /** Signed-in user's id; lets the owner approve or query the final bill. */
+  viewerUserId?: string | null;
+  /** 'placed' right after checkout, 'tracking' when reopened from My orders. */
+  variant?: 'placed' | 'tracking';
 }) {
   const [currentOrder, setCurrentOrder] = useState(order);
   const [outlets, setOutlets] = useState<Outlet[]>(OFFICIAL_OUTLETS);
@@ -764,7 +775,7 @@ export function OrderConfirmation({
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
-      <div className="relative w-full max-w-md overflow-hidden rounded-3xl bg-white shadow-2xl animate-scale-in">
+      <div className="relative max-h-[92vh] w-full max-w-md overflow-y-auto rounded-3xl bg-white shadow-2xl animate-scale-in">
         {toast && (
           <div className="absolute right-5 top-5 z-10 rounded-xl bg-gray-900 px-4 py-2 text-xs font-semibold text-white shadow-lg">
             {toast}
@@ -774,9 +785,13 @@ export function OrderConfirmation({
           <div className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-white/20 ring-4 ring-white/30">
             <CheckCircle2 className="h-9 w-9 text-brand-200" />
           </div>
-          <h2 className="mt-4 text-xl font-extrabold">Order Received!</h2>
+          <h2 className="mt-4 text-xl font-extrabold">
+            {variant === 'tracking' ? `Order #${currentOrder.id.slice(0, 8).toUpperCase()}` : 'Order Received!'}
+          </h2>
           <p className="mt-1 text-sm text-brand-50/90">
-            Thank you, {currentOrder.contact_name}. An outlet team will process your order.
+            {variant === 'tracking'
+              ? `Placed ${new Date(currentOrder.created_at).toLocaleString()}`
+              : `Thank you, ${currentOrder.contact_name}. An outlet team will process your order.`}
           </p>
         </div>
         <div className="px-6 py-5">
@@ -809,7 +824,7 @@ export function OrderConfirmation({
             <Row label="Payment" value={currentOrder.payment_method || 'Pay on Delivery'} />
             <Row label="Items" value={`${currentOrder.items.length} item(s)`} />
             <div className="flex items-center justify-between border-t border-gray-100 pt-2">
-              <span className="text-sm text-gray-500">Subtotal</span>
+              <span className="text-sm text-gray-500">Estimated subtotal</span>
               <span className="text-gray-800">{formatUGX(currentOrder.subtotal)}</span>
             </div>
             <div className="flex items-center justify-between">
@@ -817,12 +832,18 @@ export function OrderConfirmation({
               <span className="text-gray-800">{formatUGX(currentOrder.delivery_fee ?? 0)}</span>
             </div>
             <div className="flex items-center justify-between">
-              <span className="font-semibold text-gray-700">Total</span>
+              <span className="font-semibold text-gray-700">Estimated total</span>
               <span className="text-lg font-extrabold text-brand-700">
                 {formatUGX(currentOrder.total_amount ?? (currentOrder.subtotal ?? 0) + (currentOrder.delivery_fee ?? 0))}
               </span>
             </div>
           </div>
+
+          <FinalBillPanel
+            order={currentOrder}
+            canRespond={Boolean(viewerUserId && currentOrder.user_id === viewerUserId)}
+            onOrderUpdated={setCurrentOrder}
+          />
 
           <button
             onClick={handleDownloadShopList}
@@ -836,7 +857,7 @@ export function OrderConfirmation({
             onClick={onClose}
             className="mt-3 w-full rounded-full bg-brand-600 py-3 text-sm font-bold text-white transition hover:bg-brand-700"
           >
-            Continue Shopping
+            {variant === 'tracking' ? 'Close' : 'Continue Shopping'}
           </button>
         </div>
       </div>

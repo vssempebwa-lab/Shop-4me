@@ -8,6 +8,7 @@ import CheckoutModal, { OrderConfirmation } from './components/CheckoutModal';
 import MerchantDashboard from './components/MerchantDashboard';
 import MerchantSignInModal from './components/MerchantSignInModal';
 import AttendantWorkspace from './components/AttendantWorkspace';
+import MyOrdersModal from './components/MyOrdersModal';
 import { CartProvider } from './context/CartContext';
 import { hasSupabaseConfig, supabase } from './lib/supabase';
 import {
@@ -115,6 +116,8 @@ function App() {
   const [selectedOutletContext, setSelectedOutletContext] = useState<Outlet | null>(null);
   const [selectedAttendantContext, setSelectedAttendantContext] = useState<UserRoleProfile | null>(null);
   const [placedOrder, setPlacedOrder] = useState<Order | null>(null);
+  const [myOrdersOpen, setMyOrdersOpen] = useState(false);
+  const [trackedOrder, setTrackedOrder] = useState<Order | null>(null);
   const [merchantMode, setMerchantMode] = useState(localWorkspace === 'admin');
   const [attendantMode, setAttendantMode] = useState(localWorkspace === 'attendant');
   const [localWorkspaceSession, setLocalWorkspaceSession] = useState<LocalWorkspace | null>(() =>
@@ -387,6 +390,7 @@ function App() {
           onCustomerSignIn={signInWithEmail}
           onCustomerSignUp={signUpWithEmail}
           onCustomerLogout={signOut}
+          onOpenMyOrders={user ? () => setMyOrdersOpen(true) : undefined}
           siteSettings={siteSettings}
         />
 
@@ -574,7 +578,26 @@ function App() {
           userId={user?.id}
         />
         {placedOrder && (
-          <OrderConfirmation order={placedOrder} onClose={() => setPlacedOrder(null)} />
+          <OrderConfirmation
+            order={placedOrder}
+            viewerUserId={user?.id ?? null}
+            onClose={() => setPlacedOrder(null)}
+          />
+        )}
+        {myOrdersOpen && user && !trackedOrder && (
+          <MyOrdersModal
+            userId={user.id}
+            onClose={() => setMyOrdersOpen(false)}
+            onSelect={setTrackedOrder}
+          />
+        )}
+        {trackedOrder && (
+          <OrderConfirmation
+            order={trackedOrder}
+            variant="tracking"
+            viewerUserId={user?.id ?? null}
+            onClose={() => setTrackedOrder(null)}
+          />
         )}
         <MerchantSignInModal
           open={merchantLoginOpen}

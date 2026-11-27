@@ -68,6 +68,7 @@ interface HeaderProps {
   onCustomerSignIn: (email: string, password: string) => Promise<unknown>;
   onCustomerSignUp: (email: string, password: string) => Promise<unknown>;
   onCustomerLogout: () => void;
+  onOpenMyOrders?: () => void;
   siteSettings: SiteSettings;
 }
 
@@ -84,6 +85,7 @@ export default function Header({
   onCustomerSignIn,
   onCustomerSignUp,
   onCustomerLogout,
+  onOpenMyOrders,
   siteSettings,
 }: HeaderProps) {
   const { count } = useCart();
@@ -270,6 +272,18 @@ export default function Header({
                             </p>
                           </div>
                         </div>
+                        {onOpenMyOrders && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              onOpenMyOrders();
+                              setAccountOpen(false);
+                            }}
+                            className="w-full rounded-xl border border-brand-100 bg-white px-3 py-2 text-sm font-semibold text-brand-700 transition hover:bg-brand-50"
+                          >
+                            My orders &amp; bills
+                          </button>
+                        )}
                         {merchantRole && (
                           <button
                             onClick={() => {

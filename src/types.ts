@@ -34,6 +34,25 @@ export interface OrderItem {
   created_at?: string;
 }
 
+export type FinalBillLineStatus = 'bought' | 'substituted' | 'unavailable';
+
+export interface FinalBillItem {
+  product_id: string;
+  name: string;
+  unit: string;
+  quantity: number;
+  /** Catalogue unit price the customer saw at checkout. */
+  estimated_unit_price: number;
+  status: FinalBillLineStatus;
+  /** What the attendant actually paid for the whole line, in UGX. */
+  actual_line_total: number;
+  substitute_name?: string | null;
+  note?: string | null;
+}
+
+export type BillStatus = 'not_started' | 'awaiting_approval' | 'approved' | 'queried';
+export type BillApprovalMethod = 'customer_app' | 'phone_call' | 'auto_within_estimate';
+
 export interface Order {
   id: string;
   contact_name: string;
@@ -64,6 +83,15 @@ export interface Order {
   handled_by_attendant_id?: string | null;
   handled_by_attendant_name?: string | null;
   delivered_at?: string | null;
+  final_items?: FinalBillItem[] | null;
+  final_subtotal?: number | null;
+  final_total?: number | null;
+  bill_status?: BillStatus | null;
+  bill_submitted_at?: string | null;
+  bill_submitted_by_name?: string | null;
+  bill_responded_at?: string | null;
+  bill_approval_method?: BillApprovalMethod | null;
+  bill_customer_note?: string | null;
   created_at: string;
 }
 

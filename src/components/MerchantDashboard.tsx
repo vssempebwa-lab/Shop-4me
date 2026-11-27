@@ -68,6 +68,7 @@ import {
 } from '../lib/localAdminUsers';
 import { CATEGORIES } from './CategoryBar';
 import ImageUploader from './ImageUploader';
+import { BILL_STATUS_META, getBillStatus, getEstimatedTotal } from '../lib/finalBill';
 import ConfirmDeleteModal from './ConfirmDeleteModal';
 import AvatarUploader from './AvatarUploader';
 import UserAvatar from './UserAvatar';
@@ -2384,7 +2385,20 @@ function OrderShell({ order, children }: { order: Order; children: React.ReactNo
       <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-gray-50 p-3">
         <div className="text-xs text-gray-500">
           <p>{order.items.length} item(s)</p>
-          <p className="font-bold text-brand-700">{formatUGX((order.subtotal ?? 0) + (order.delivery_fee ?? 0))}</p>
+          <p className={typeof order.final_total === 'number' ? 'text-gray-400' : 'font-bold text-brand-700'}>
+            Est. {formatUGX(getEstimatedTotal(order))}
+          </p>
+          {typeof order.final_total === 'number' && (
+            <p className="font-bold text-brand-700">Final {formatUGX(order.final_total)}</p>
+          )}
+          {getBillStatus(order) !== 'not_started' && (
+            <span
+              className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[11px] font-bold ring-1 ${BILL_STATUS_META[getBillStatus(order)].badgeClass}`}
+              title={order.bill_customer_note ? `Customer: ${order.bill_customer_note}` : undefined}
+            >
+              {BILL_STATUS_META[getBillStatus(order)].label}
+            </span>
+          )}
         </div>
         {children}
       </div>
