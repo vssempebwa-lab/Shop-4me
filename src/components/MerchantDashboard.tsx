@@ -638,10 +638,39 @@ export default function MerchantDashboard({
     showToast({ tone: 'success', message: 'Order reversed back to pending queue.' });
   };
 
+  /**
+   * Attendants cannot dispatch until the final bill is approved (enforced in
+   * the database). Admins may override, but must confirm, and it is logged.
+   */
+  const confirmBillGateOverride = async (order: Order, action: string) => {
+    const billStatus = getBillStatus(order);
+    if (billStatus === 'approved') return true;
+
+    const confirmed = window.confirm(
+      `The final bill for #${order.id.slice(0, 8).toUpperCase()} is not approved (${BILL_STATUS_META[billStatus].label.toLowerCase()}). ` +
+        `The customer has not agreed to what they will pay. ${action} anyway?`,
+    );
+    if (confirmed && !isDemoOrder(order)) {
+      await writeAuditLog('admin_bill_gate_override', order.id, {
+        action,
+        bill_status: billStatus,
+        outlet_code: order.outlet_code,
+      });
+    }
+    return confirmed;
+  };
+
   const changeOutletOrderStatus = async (
     order: Order,
     nextStatus: OrderStatus,
   ) => {
+    if (
+      (nextStatus === 'Transit' || nextStatus === 'Delivered') &&
+      !(await confirmBillGateOverride(order, `Mark as ${nextStatus}`))
+    ) {
+      return;
+    }
+
     const patch: Partial<Order> = {
       order_status: nextStatus,
       status: nextStatus,
@@ -682,6 +711,7 @@ export default function MerchantDashboard({
   };
 
   const dispatchRider = async (order: Order, rider: OutletRider) => {
+    if (!(await confirmBillGateOverride(order, `Dispatch ${rider.name}`))) return;
     const dispatchedAt = new Date().toISOString();
     const patch: Partial<Order> = {
       dispatched_rider_id: rider.id,
@@ -727,6 +757,13 @@ export default function MerchantDashboard({
   };
 
   const markAsPaidAndDelivered = async (order: Order) => {
+    const normalizedStatus = getStatusDisplay(order.order_status ?? order.status).status;
+    if (
+      normalizedStatus !== 'Transit' &&
+      !(await confirmBillGateOverride(order, 'Mark as delivered and paid'))
+    ) {
+      return;
+    }
     const deliveredAt = new Date().toISOString();
     const patch: Partial<Order> = {
       order_status: 'Delivered',

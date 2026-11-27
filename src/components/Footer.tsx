@@ -72,6 +72,10 @@ export default function Footer({
         <div className="mt-8 flex flex-col items-center justify-between gap-2 border-t border-gray-100 pt-5 sm:flex-row">
           <p className="text-xs text-gray-400">
             © {new Date().getFullYear()} Shop For Me Uganda. All rights reserved.
+            <span className="mx-2">·</span>
+            <a href="/privacy" className="hover:text-brand-700 hover:underline">Privacy</a>
+            <span className="mx-2">·</span>
+            <a href="/terms" className="hover:text-brand-700 hover:underline">Terms</a>
           </p>
           <p className="text-xs text-gray-400">{siteSettings.footerPaymentText}</p>
         </div>

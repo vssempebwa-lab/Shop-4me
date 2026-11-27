@@ -9,6 +9,11 @@ import MerchantDashboard from './components/MerchantDashboard';
 import MerchantSignInModal from './components/MerchantSignInModal';
 import AttendantWorkspace from './components/AttendantWorkspace';
 import MyOrdersModal from './components/MyOrdersModal';
+import TrackOrderModal from './components/TrackOrderModal';
+import ConsentBanner from './components/ConsentBanner';
+import LegalPage, { type LegalPageKind } from './components/LegalPage';
+import { DEMO_ORDER_PREFIX } from './lib/demoOrders';
+import { getOrderCode, type GuestOrderAccess } from './lib/orderTracking';
 import { CartProvider } from './context/CartContext';
 import { hasSupabaseConfig, supabase } from './lib/supabase';
 import {
@@ -118,6 +123,8 @@ function App() {
   const [placedOrder, setPlacedOrder] = useState<Order | null>(null);
   const [myOrdersOpen, setMyOrdersOpen] = useState(false);
   const [trackedOrder, setTrackedOrder] = useState<Order | null>(null);
+  const [trackOrderOpen, setTrackOrderOpen] = useState(false);
+  const [trackedGuestAccess, setTrackedGuestAccess] = useState<GuestOrderAccess | null>(null);
   const [merchantMode, setMerchantMode] = useState(localWorkspace === 'admin');
   const [attendantMode, setAttendantMode] = useState(localWorkspace === 'attendant');
   const [localWorkspaceSession, setLocalWorkspaceSession] = useState<LocalWorkspace | null>(() =>
@@ -260,6 +267,15 @@ function App() {
     [],
   );
 
+  // Stable object so the confirmation screen's polling effect doesn't restart.
+  const placedGuestAccess = useMemo<GuestOrderAccess | null>(
+    () =>
+      placedOrder && !user && !placedOrder.id.startsWith(DEMO_ORDER_PREFIX)
+        ? { code: getOrderCode(placedOrder.id), phone: placedOrder.phone }
+        : null,
+    [placedOrder, user],
+  );
+
   const counts = useMemo(() => {
     const c: Record<string, number> = { All: products.length };
     for (const p of products) c[p.category] = (c[p.category] ?? 0) + 1;
@@ -374,6 +390,25 @@ function App() {
     );
   }
 
+  const legalPage: LegalPageKind | null =
+    localWorkspace === 'client' && window.location.pathname === '/privacy'
+      ? 'privacy'
+      : localWorkspace === 'client' && window.location.pathname === '/terms'
+        ? 'terms'
+        : null;
+
+  if (legalPage) {
+    return (
+      <div className="flex min-h-screen flex-col bg-gray-50">
+        <div className="flex-1">
+          <LegalPage kind={legalPage} siteSettings={siteSettings} />
+        </div>
+        <Footer siteSettings={siteSettings} />
+        <ConsentBanner />
+      </div>
+    );
+  }
+
   return (
     <CartProvider>
       <div className="flex min-h-screen flex-col bg-gray-50">
@@ -391,6 +426,7 @@ function App() {
           onCustomerSignUp={signUpWithEmail}
           onCustomerLogout={signOut}
           onOpenMyOrders={user ? () => setMyOrdersOpen(true) : undefined}
+          onTrackOrder={() => setTrackOrderOpen(true)}
           siteSettings={siteSettings}
         />
 
@@ -550,6 +586,7 @@ function App() {
         <Footer
           siteSettings={siteSettings}
         />
+        <ConsentBanner />
 
         <CartDrawer
           open={cartOpen}
@@ -581,6 +618,7 @@ function App() {
           <OrderConfirmation
             order={placedOrder}
             viewerUserId={user?.id ?? null}
+            guestAccess={placedGuestAccess}
             onClose={() => setPlacedOrder(null)}
           />
         )}
@@ -591,12 +629,26 @@ function App() {
             onSelect={setTrackedOrder}
           />
         )}
+        {trackOrderOpen && !trackedOrder && (
+          <TrackOrderModal
+            onClose={() => setTrackOrderOpen(false)}
+            onFound={(order, access) => {
+              setTrackedGuestAccess(access);
+              setTrackedOrder(order);
+            }}
+          />
+        )}
         {trackedOrder && (
           <OrderConfirmation
             order={trackedOrder}
             variant="tracking"
             viewerUserId={user?.id ?? null}
-            onClose={() => setTrackedOrder(null)}
+            guestAccess={trackedGuestAccess}
+            onClose={() => {
+              setTrackedOrder(null);
+              setTrackedGuestAccess(null);
+              setTrackOrderOpen(false);
+            }}
           />
         )}
         <MerchantSignInModal

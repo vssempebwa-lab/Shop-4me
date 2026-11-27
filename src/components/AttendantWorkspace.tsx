@@ -21,7 +21,8 @@ import {
   getBillStatus,
   getEstimatedTotal,
 } from '../lib/finalBill';
-import FinalBillEditor from './FinalBillEditor';
+import FinalBillEditor, { type BillPhotoChanges } from './FinalBillEditor';
+import { blobToDataUrl, compressBillPhoto, uploadBillPhoto } from '../lib/billPhotos';
 import { supabase } from '../lib/supabase';
 import {
   findOutletByCode,
@@ -357,9 +358,29 @@ export default function AttendantWorkspace({
     return updatedOrder;
   };
 
-  const submitFinalBill = async (order: Order, items: FinalBillItem[]) => {
+  const submitFinalBill = async (order: Order, items: FinalBillItem[], photos: BillPhotoChanges) => {
+    let billPhotos = photos.kept;
+    if (photos.added.length) {
+      setUpdatingOrderId(order.id);
+      try {
+        const isDemo = order.id.startsWith(DEMO_ORDER_PREFIX);
+        const uploaded = await Promise.all(
+          photos.added.map(async (file) => {
+            const compressed = await compressBillPhoto(file);
+            return isDemo ? blobToDataUrl(compressed) : uploadBillPhoto(order.id, compressed);
+          }),
+        );
+        billPhotos = [...photos.kept, ...uploaded];
+      } catch (uploadError) {
+        setUpdatingOrderId(null);
+        showToast(uploadError instanceof Error ? uploadError.message : 'Could not upload the photos.');
+        return;
+      }
+    }
+
     const updatedOrder = await saveBillPatch(order, {
       final_items: items,
+      bill_photos: billPhotos,
       bill_status: 'awaiting_approval',
       bill_submitted_at: new Date().toISOString(),
       bill_submitted_by_name: attendantName,
@@ -549,7 +570,7 @@ export default function AttendantWorkspace({
           order={billOrder}
           saving={updatingOrderId === billOrder.id}
           onClose={() => setBillOrder(null)}
-          onSubmit={(items) => void submitFinalBill(billOrder, items)}
+          onSubmit={(items, photos) => void submitFinalBill(billOrder, items, photos)}
         />
       )}
 

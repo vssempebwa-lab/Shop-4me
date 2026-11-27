@@ -69,6 +69,7 @@ interface HeaderProps {
   onCustomerSignUp: (email: string, password: string) => Promise<unknown>;
   onCustomerLogout: () => void;
   onOpenMyOrders?: () => void;
+  onTrackOrder?: () => void;
   siteSettings: SiteSettings;
 }
 
@@ -86,6 +87,7 @@ export default function Header({
   onCustomerSignUp,
   onCustomerLogout,
   onOpenMyOrders,
+  onTrackOrder,
   siteSettings,
 }: HeaderProps) {
   const { count } = useCart();
@@ -185,13 +187,17 @@ export default function Header({
                         <p className="text-xs text-gray-500">Call / WhatsApp support</p>
                       </div>
                     </button>
-                    <div className="flex items-start gap-3 rounded-xl p-3">
+                    <button
+                      type="button"
+                      onClick={() => { setHelpOpen(false); onTrackOrder?.(); }}
+                      className="flex w-full items-start gap-3 rounded-xl p-3 text-left transition hover:bg-brand-50"
+                    >
                       <MapPin className="mt-0.5 h-5 w-5 text-brand-600" />
                       <div>
                         <p className="text-sm font-semibold text-gray-800">Track Order</p>
-                        <p className="text-xs text-gray-500">Follow your delivery live</p>
+                        <p className="text-xs text-gray-500">Order code + phone number</p>
                       </div>
-                    </div>
+                    </button>
                     <div className="flex items-start gap-3 rounded-xl p-3">
                       <ShieldCheck className="mt-0.5 h-5 w-5 text-brand-600" />
                       <div>

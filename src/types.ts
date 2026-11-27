@@ -92,6 +92,8 @@ export interface Order {
   bill_responded_at?: string | null;
   bill_approval_method?: BillApprovalMethod | null;
   bill_customer_note?: string | null;
+  /** Public URLs of photos of the goods / market receipt. */
+  bill_photos?: string[] | null;
   created_at: string;
 }
 

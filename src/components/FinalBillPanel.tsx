@@ -10,16 +10,24 @@ import {
   getBillStatus,
   getEstimatedTotal,
 } from '../lib/finalBill';
+import { respondToBillWithCode, type GuestOrderAccess } from '../lib/orderTracking';
 
 interface FinalBillPanelProps {
   order: Order;
   /** True when the signed-in viewer owns this order and may approve it. */
   canRespond: boolean;
+  /** Guests respond with their order code + phone instead of a session. */
+  guestAccess?: GuestOrderAccess | null;
   onOrderUpdated: (order: Order) => void;
 }
 
 /** Customer-facing view of the final bill, with approve / query actions. */
-export default function FinalBillPanel({ order, canRespond, onOrderUpdated }: FinalBillPanelProps) {
+export default function FinalBillPanel({
+  order,
+  canRespond: signedInCanRespond,
+  guestAccess = null,
+  onOrderUpdated,
+}: FinalBillPanelProps) {
   const [querying, setQuerying] = useState(false);
   const [note, setNote] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -29,6 +37,7 @@ export default function FinalBillPanel({ order, canRespond, onOrderUpdated }: Fi
   const estimatedTotal = getEstimatedTotal(order);
   const hasBill = Boolean(order.final_items?.length) && typeof order.final_total === 'number';
   const isDemoOrder = order.id.startsWith(DEMO_ORDER_PREFIX);
+  const canRespond = signedInCanRespond || Boolean(guestAccess);
 
   const respond = async (approve: boolean) => {
     setError(null);
@@ -51,6 +60,19 @@ export default function FinalBillPanel({ order, canRespond, onOrderUpdated }: Fi
       setSubmitting(false);
       setQuerying(false);
       onOrderUpdated(updated);
+      return;
+    }
+
+    if (guestAccess) {
+      const result = await respondToBillWithCode(guestAccess, approve, approve ? null : note.trim());
+      setSubmitting(false);
+      if (!result.order) {
+        setError(result.error);
+        return;
+      }
+      setQuerying(false);
+      setNote('');
+      onOrderUpdated(result.order);
       return;
     }
 
@@ -111,6 +133,24 @@ export default function FinalBillPanel({ order, canRespond, onOrderUpdated }: Fi
             <span className="font-bold text-gray-800">Final bill</span>
             <span className="text-lg font-extrabold text-brand-700">{formatUGX(order.final_total!)}</span>
           </div>
+          {(order.bill_photos?.length ?? 0) > 0 && (
+            <div className="pt-1">
+              <p className="mb-1.5 text-xs font-semibold text-gray-500">Photos from your attendant</p>
+              <div className="flex flex-wrap gap-2">
+                {order.bill_photos!.map((url) => (
+                  <a
+                    key={url}
+                    href={url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="block h-16 w-16 overflow-hidden rounded-xl border border-gray-200 bg-gray-50"
+                  >
+                    <img src={url} alt="Goods or market receipt" loading="lazy" className="h-full w-full object-cover" />
+                  </a>
+                ))}
+              </div>
+            </div>
+          )}
           {billStatus === 'approved' && describeApprovalMethod(order) && (
             <p className="flex items-center gap-1.5 text-xs font-semibold text-brand-700">
               <CheckCircle2 className="h-3.5 w-3.5" />

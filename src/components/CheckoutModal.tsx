@@ -18,6 +18,7 @@ import { generateShopListPDF, preloadShopListPdfGenerator } from '../lib/shopLis
 import { DEFAULT_PAYMENT_SETTINGS, fetchPaymentSettings, type PaymentSettings } from '../lib/paymentSettings';
 import AttendantProfileCard from './AttendantProfileCard';
 import FinalBillPanel from './FinalBillPanel';
+import { getOrderCode, trackOrder, type GuestOrderAccess } from '../lib/orderTracking';
 
 interface CheckoutModalProps {
   open: boolean;
@@ -511,6 +512,12 @@ export default function CheckoutModal({
                 <>Place Order · est. {formatUGX(total)}</>
               )}
             </button>
+            <p className="mt-2 text-center text-[11px] text-gray-400">
+              By placing an order you agree to our{' '}
+              <a href="/terms" target="_blank" rel="noopener" className="underline hover:text-brand-700">terms</a>{' '}
+              and{' '}
+              <a href="/privacy" target="_blank" rel="noopener" className="underline hover:text-brand-700">privacy policy</a>.
+            </p>
           </div>
         </form>
       </div>
@@ -599,6 +606,7 @@ export function OrderConfirmation({
   onClose,
   viewerUserId = null,
   variant = 'placed',
+  guestAccess = null,
 }: {
   order: Order;
   onClose: () => void;
@@ -606,6 +614,8 @@ export function OrderConfirmation({
   viewerUserId?: string | null;
   /** 'placed' right after checkout, 'tracking' when reopened from My orders. */
   variant?: 'placed' | 'tracking';
+  /** Order code + phone for guests, who cannot read orders directly. */
+  guestAccess?: GuestOrderAccess | null;
 }) {
   const [currentOrder, setCurrentOrder] = useState(order);
   const [outlets, setOutlets] = useState<Outlet[]>(OFFICIAL_OUTLETS);
@@ -638,7 +648,7 @@ export function OrderConfirmation({
   }, []);
 
   useEffect(() => {
-    if (isDemoOrder) return;
+    if (isDemoOrder || guestAccess) return;
 
     let cancelled = false;
 
@@ -674,7 +684,7 @@ export function OrderConfirmation({
     return () => {
       cancelled = true;
     };
-  }, [isDemoOrder, order]);
+  }, [guestAccess, isDemoOrder, order]);
 
   useEffect(() => {
     const loadOutlets = async () => {
@@ -712,8 +722,26 @@ export function OrderConfirmation({
     };
   }, [currentOrder.outlet_code]);
 
+  // Guests have no realtime access to orders, so poll the tracking RPC.
   useEffect(() => {
-    if (isDemoOrder) return;
+    if (isDemoOrder || !guestAccess) return;
+
+    let cancelled = false;
+    const refresh = async () => {
+      const { order: tracked } = await trackOrder(guestAccess);
+      if (!cancelled && tracked) setCurrentOrder(tracked);
+    };
+
+    void refresh();
+    const intervalId = window.setInterval(() => void refresh(), 20000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [guestAccess, isDemoOrder]);
+
+  useEffect(() => {
+    if (isDemoOrder || guestAccess) return;
 
     const channel = supabase
       .channel(`client-order-${order.id}`)
@@ -738,7 +766,7 @@ export function OrderConfirmation({
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [isDemoOrder, order.id]);
+  }, [guestAccess, isDemoOrder, order.id]);
 
   useEffect(() => {
     if (!toast) return;
@@ -801,6 +829,16 @@ export function OrderConfirmation({
           </p>
         </div>
         <div className="px-6 py-5">
+          {variant === 'placed' && !viewerUserId && (
+            <div className="mb-3 rounded-xl border border-gold-200 bg-gold-50 px-3 py-2.5 text-sm text-gold-800">
+              <p className="font-bold">
+                Your order code: <span className="font-mono tracking-wider">#{getOrderCode(currentOrder.id)}</span>
+              </p>
+              <p className="mt-0.5 text-xs">
+                Save it. Use it with your phone number under Help → Track Order to follow your order and approve the final bill.
+              </p>
+            </div>
+          )}
           <div className="rounded-xl bg-brand-50 px-3 py-2.5 text-sm">
             <div className="flex items-center gap-2">
             <Truck className="h-4 w-4 text-brand-600" />
@@ -820,7 +858,7 @@ export function OrderConfirmation({
             </div>
           </div>
           <div className="mt-3 space-y-2 text-sm">
-            <Row label="Order ID" value={`#${currentOrder.id.slice(0, 8).toUpperCase()}`} />
+            <Row label="Order code" value={`#${getOrderCode(currentOrder.id)}`} />
             <Row label="Contact" value={currentOrder.contact_name} />
             <Row label="Phone" value={currentOrder.phone} />
             <Row label="Delivery to" value={currentOrder.delivery_address} />
@@ -848,6 +886,7 @@ export function OrderConfirmation({
           <FinalBillPanel
             order={currentOrder}
             canRespond={Boolean(viewerUserId && currentOrder.user_id === viewerUserId)}
+            guestAccess={guestAccess}
             onOrderUpdated={setCurrentOrder}
           />
 
