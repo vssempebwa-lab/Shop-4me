@@ -80,7 +80,9 @@ Those are real identifiers in existing order/user records and should only become
 - Attendants can select/update only shared orders assigned to their `assigned_outlet`.
 - Admins can select/update/delete all orders.
 - `order_items` policies mirror the parent order access.
-- Active outlet records are public-readable so checkout and temporary free-access dashboard flows can populate outlet selectors.
+- Active outlet records are public-readable so checkout can populate outlet selectors.
+- Customer and guest order inserts are repriced from `products` by a trigger; status, payment and outlet-sharing fields are reset so only staff can set them (`20261127120000_enforce_order_integrity.sql`).
+- Final bills (`final_items`, `final_total`, `bill_status`) are computed by the `orders_compute_final_bill` trigger; customers approve or query through the `respond_to_final_bill` RPC (`20261127100000_add_final_bill_flow.sql`).
 - Admin-only data such as audit logs and account management records is restricted to active approved admins.
 - New admin/attendant accounts are created through the Netlify function with the Supabase service role key kept server-side.
 - Attendant status and rider-dispatch actions write `attendant_name`, `attendant_user_id`, and `outlet_code` into `admin_audit_logs.metadata`, so the Admin Audit tab can trace who handled each order.
@@ -94,9 +96,9 @@ Run `supabase/migrations/20260730172000_add_user_avatars.sql` to set up profile 
 - Max file size: 2MB
 - Allowed types: `image/jpeg`, `image/png`, `image/webp`
 - Read policy: public read for avatar display
-- Write policy: authenticated users only
+- Write policy: admins, or the signed-in user in their own `{user_id}/` folder
 
-The account form compresses selected images before upload and stores them at `avatars/{user_id}/profile.{jpg|png|webp}`. In the temporary free-access mode, avatars are stored locally as resized data URLs because there is no authenticated Storage session.
+The account form compresses selected images before upload and stores them at `avatars/{user_id}/profile.{jpg|png|webp}`. In the local dev free-access mode (`npm run dev:admin` / `dev:attendant`, see below), avatars are stored locally as resized data URLs because there is no authenticated Storage session.
 
 ## Netlify Environment Variables
 
@@ -107,13 +109,17 @@ SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 ```
 
-For the current temporary no-login dashboard mode, also set:
+Do **not** set `SFM_ALLOW_FREE_ADMIN_ACCESS` on Netlify. The no-login bypass
+header is only honoured under `netlify dev` (`NETLIFY_DEV=true`), so on a
+deployed site the flag has no effect, and staff must sign in with a real
+Supabase account. Create the first admin with `npm run create-admin`.
 
-```text
-SFM_ALLOW_FREE_ADMIN_ACCESS=true
-```
+## Local dev free-access workspaces
 
-Remove that flag when you re-enable proper admin login.
+`npm run dev:admin` (port 5176) and `npm run dev:attendant` (port 5174) open
+pre-filled local workspaces for testing without a Supabase login. They exist
+only in `vite dev`: production builds strip the credentials, and `/admin`,
+`/merchant` and `/attendant` go through real Supabase auth.
 
 The frontend should continue using only:
 
